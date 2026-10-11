@@ -8,7 +8,7 @@
 // The old URL (and the old "steeradar-secret-2026" key, which is still in git
 // history) belong to the previous insecure backend — retire that deployment.
 window.STEERADAR = {
-  SHEET_API_URL: 'https://script.google.com/macros/s/AKfycbwMv45uY5nlbXRL12H-zZxfu9KeVIm2o9i3n_kqfw9Xd-4KfS_YK4iD67GfGbmCYtix/exec',
+  SHEET_API_URL: 'https://script.google.com/macros/s/AKfycbwq7bhzuAaZIon7-uOyDrr-a7dzM6jwFdsRr8vqUwpE5nUGawFB-asoJW8UXZohrKrX/exec',
   CLOUD_SYNC_DEFAULT: true,
 
   APP_NAME: 'Steeradar',
