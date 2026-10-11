@@ -1,10 +1,10 @@
 name: Unzip repo file
 
 on:
-  workflow_dispatch:   # tap "Run workflow" from your phone
+  workflow_dispatch:   # lets you run it manually from your phone
 
 permissions:
-  contents: write      # needed to push back
+  contents: write      # required to push changes back
 
 jobs:
   unzip:
@@ -13,13 +13,23 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Unzip preserving folders
-        run: unzip -o your-file.zip -d .
+      - name: Find and unzip file
+        run: |
+          # Automatically find the first .zip file in the repo (ignores .git)
+          ZIP=$(find . -name "*.zip" -not -path "./.git/*" | head -n 1)
+
+          if [ -z "$ZIP" ]; then
+            echo "No .zip file found in the repo!"
+            exit 1
+          fi
+
+          echo "Found zip: $ZIP"
+          unzip -o "$ZIP" -d .
 
       - name: Commit and push extracted files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "Extract your-file.zip" || echo "Nothing to commit"
+          git commit -m "Auto-unzip files" || echo "Nothing to commit"
           git push
