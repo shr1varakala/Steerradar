@@ -1,7 +1,7 @@
 // config.js - Steeradar shared configuration
 window.STEERADAR = {
   // Backend URL only - no secret. v6.1 uses per-user tokens.
-  SHEET_API_URL: 'https://script.google.com/macros/s/AKfycbwMv45uY5nlbXRL12H-zZxfu9KeVIm2o9i3n_kqfw9Xd-4KfS_YK4iD67GfGbmCYtix/exec',
+  SHEET_API_URL: 'https://script.google.com/macros/s/AKfycbwq7bhzuAaZIon7-uOyDrr-a7dzM6jwFdsRr8vqUwpE5nUGawFB-asoJW8UXZohrKrX/exec',
 
   CLOUD_SYNC_DEFAULT: true,
   APP_NAME: 'Steeradar',
