@@ -1,4 +1,4 @@
-name: Unzip repo file
+name: Move files to root
 
 on:
   workflow_dispatch:   # lets you run it manually from your phone
@@ -13,23 +13,35 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Find and unzip file
+      - name: Extract and move files
         run: |
-          # Automatically find the first .zip file in the repo (ignores .git)
-          ZIP=$(find . -name "*.zip" -not -path "./.git/*" | head -n 1)
+          # Create a temporary folder
+          mkdir -p _temp_extract
 
-          if [ -z "$ZIP" ]; then
-            echo "No .zip file found in the repo!"
-            exit 1
+          # Unzip into the temp folder
+          unzip -o steeradar-v6.1-fixed.zip -d _temp_extract
+
+          # Check if there is a nested folder (like "Steeradar") inside the zip
+          if [ -d "_temp_extract/Steeradar" ]; then
+            # Move all files, including hidden ones, out to the root
+            shopt -s dotglob
+            mv _temp_extract/Steeradar/* .
+            shopt -u dotglob
+          else
+            # If there's no nested folder, move everything out to the root
+            shopt -s dotglob
+            mv _temp_extract/* .
+            shopt -u dotglob
           fi
 
-          echo "Found zip: $ZIP"
-          unzip -o "$ZIP" -d .
+          # Clean up the temporary folder and the zip file
+          rm -rf _temp_extract
+          rm -f steeradar-v6.1-fixed.zip
 
-      - name: Commit and push extracted files
+      - name: Commit and push changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "Auto-unzip files" || echo "Nothing to commit"
+          git commit -m "Move extracted files to root" || echo "No changes to commit"
           git push
