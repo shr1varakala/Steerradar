@@ -1,30 +1,26 @@
-// js/chat.js - Lane chat + Room chat + Personal chat
-// Every chat has a roomId so incoming messages route correctly.
+// js/chat.js - Chat for Steeradar v6.1
+// Rooms:
+//   dm-<PLATE_A>-<PLATE_B>  (private 1:1, both sides derive the same id)
+//   local-<geohash>          (neighbourhood room)
 
 import { api } from './api.js';
-import { state, storage, showToast } from './store.js';
+import { state, storage, showToast, session } from './store.js';
 
 const CFG = window.STEERADAR || {};
 
-// ============================================================
-//  STATE
-// ============================================================
 let activeRoom = null;
-// {
-//   id: 'lane-xxx' | 'local-xxx' | 'dm-xxx',
-//   type: 'lane' | 'local' | 'personal',
-//   title: string,
-//   avatar: string,
-//   peerIds: [string],   // one or many target peer ids
-//   mine: boolean,       // my own lane?
-//   vehicle: string,     // for personal: the other vehicle
-// }
-
-let activeConns = new Map();  // peerId -> DataConnection
+let activeConns = new Map();
 let ownLaneHintShown = false;
 
+function dmRoomId(a, b) {
+  const parts = [String(a || '').toUpperCase(), String(b || '').toUpperCase()].sort();
+  if (!parts[0] || !parts[1]) return null;
+  return 'dm-' + parts[0] + '-' + parts[1];
+}
+function localRoomId() { return 'local-' + (state.userGeohash || 'mesh'); }
+
 // ============================================================
-//  PUBLIC: BOOT
+//  BOOT
 // ============================================================
 export function initChat() {
   const send = document.getElementById('chatSend');
@@ -33,91 +29,85 @@ export function initChat() {
   if (send) send.onclick = sendCurrentMessage;
   if (input) {
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendCurrentMessage();
-      }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendCurrentMessage(); }
     });
   }
 
-  // Listen for peer broadcasts routed from app.js
-  window.addEventListener('steeradar:peer-chat', (e) => {
-    const detail = e.detail || {};
-    receive(detail.text, detail.sender, detail.roomId);
-  });
+  document.querySelector('[data-close="#chatModal"]')?.addEventListener('click', closeChat);
 }
 
 // ============================================================
-//  OPEN: LANE CHAT (1:1 with the driver of a lane)
+//  OPENERS
 // ============================================================
 export function openChatForLane(lane) {
   if (!lane) return;
 
-  const roomId = 'lane-' + (lane.id || lane.vehicle);
-  const peerId = lane.peerId || ('steeradar-veh-' + (lane.vehicle || lane.id));
-
-  activeRoom = {
-    id: roomId,
-    type: 'lane',
-    title: lane.driver || 'Driver',
-    avatar: lane.avatar || (lane.driver || 'DR').substring(0, 2).toUpperCase(),
-    peerIds: lane.mine ? [] : [peerId],
-    mine: !!lane.mine,
-    vehicle: lane.vehicle || '',
-  };
-  ownLaneHintShown = false;
-
-  prepareModal();
-
-  // My own lane — no one to dial
+  // Own lane - echo only
   if (lane.mine) {
-    setStatus(true, 'Your lane - waiting for passengers');
+    activeRoom = {
+      id: 'dm-' + state.vehicle + '-' + state.vehicle,
+      type: 'own',
+      title: lane.driver || 'Your lane',
+      avatar: lane.avatar || (state.userName || 'DR').substring(0, 2).toUpperCase(),
+      peerIds: [],
+      mine: true,
+      vehicle: state.vehicle,
+    };
+    ownLaneHintShown = false;
+    prepareModal();
+    setStatus(true, 'Waiting for passengers');
     addSystemBubble('This is your lane. Others can reach you here.');
-    loadHistory(roomId);
+    loadHistory(activeRoom.id);
     return;
   }
 
-  // Try to dial the peer
+  const otherVehicle = lane.vehicle || (lane.id ? lane.id.replace('mine-', '') : '');
+  if (!otherVehicle) { showToast('Cannot open chat - no vehicle id', 'error'); return; }
+
+  const roomId = dmRoomId(state.vehicle, otherVehicle);
+  if (!roomId) { showToast('Cannot open chat', 'error'); return; }
+
+  const peerId = lane.peerId || ('steeradar-veh-' + otherVehicle);
+
+  activeRoom = {
+    id: roomId,
+    type: 'personal',
+    title: lane.driver || 'Driver',
+    avatar: lane.avatar || (lane.driver || 'DR').substring(0, 2).toUpperCase(),
+    peerIds: [peerId],
+    mine: false,
+    vehicle: otherVehicle,
+  };
+  ownLaneHintShown = false;
+  prepareModal();
   dialPeer(peerId);
   loadHistory(roomId);
 }
 
-// ============================================================
-//  OPEN: LOCAL MESH ROOM (group)
-// ============================================================
-export function openLocalChat(peerId) {
-  const roomId = 'local-' + (state.userGeohash || 'mesh');
-
+export function openLocalChat() {
+  const roomId = localRoomId();
   activeRoom = {
     id: roomId,
     type: 'local',
-    title: peerId === 'room' ? 'Neighbourhood room' : 'Neighbour',
+    title: 'Neighbourhood room',
     avatar: '📡',
-    peerIds: [], // broadcast to all localConns
+    peerIds: [],
     mine: false,
     vehicle: '',
   };
   ownLaneHintShown = false;
-
   prepareModal();
-
   const n = state.localConns ? state.localConns.size : 0;
   setStatus(n > 0, n + ' connected', 'purple');
   addSystemBubble('You are on the local mesh' + (state.userGeohash ? ' - ' + state.userGeohash.toUpperCase() : ''));
   if (n === 0) addSystemBubble('Waiting for neighbours to join...');
-
   loadHistory(roomId);
 }
 
-// ============================================================
-//  OPEN: PERSONAL CHAT (1:1 with a specific vehicle)
-// ============================================================
 export function openPersonalChat(vehicle, name, avatar, peerId) {
-  if (!vehicle) return;
-
-  // Sort vehicle IDs so both sides use the same room
-  const parts = [state.vehicle, vehicle].sort();
-  const roomId = 'dm-' + parts[0] + '-' + parts[1];
+  if (!vehicle || vehicle === state.vehicle) return;
+  const roomId = dmRoomId(state.vehicle, vehicle);
+  if (!roomId) return;
 
   activeRoom = {
     id: roomId,
@@ -129,26 +119,22 @@ export function openPersonalChat(vehicle, name, avatar, peerId) {
     vehicle: vehicle,
   };
   ownLaneHintShown = false;
-
   prepareModal();
   dialPeer(activeRoom.peerIds[0]);
   loadHistory(roomId);
 }
 
 // ============================================================
-//  DIAL A PEER
+//  DIAL
 // ============================================================
 function dialPeer(peerId) {
   if (!peerId) return;
 
-  // Already connected in this session?
   if (state.connections.has(peerId)) {
     activeConns.set(peerId, state.connections.get(peerId));
     setStatus(true, 'Connected');
     return;
   }
-
-  // No peer client? Try again shortly
   if (!state.peer || !state.peer.open) {
     setStatus(false, 'Connecting to network...');
     addSystemBubble('Waiting for the WebRTC network...');
@@ -160,13 +146,8 @@ function dialPeer(peerId) {
   addSystemBubble('Dialing...');
 
   let conn;
-  try {
-    conn = state.peer.connect(peerId, { reliable: true });
-  } catch (e) {
-    setStatus(false, 'Peer unavailable');
-    addSystemBubble('Could not reach this person.');
-    return;
-  }
+  try { conn = state.peer.connect(peerId, { reliable: true }); }
+  catch (e) { setStatus(false, 'Peer unavailable'); addSystemBubble('Could not reach.'); return; }
 
   let opened = false;
   const timeout = setTimeout(() => {
@@ -185,7 +166,6 @@ function dialPeer(peerId) {
     setStatus(true, 'Connected');
     addSystemBubble('Connected');
   });
-
   conn.on('error', () => {
     clearTimeout(timeout);
     setStatus(false, 'Connection failed');
@@ -193,30 +173,22 @@ function dialPeer(peerId) {
   });
 }
 
-// ============================================================
-//  HANDLE INCOMING DATA ON A CONNECTION
-// ============================================================
 function attachHandlers(conn, peerId) {
   conn.on('data', (data) => {
     if (!data || typeof data !== 'object') return;
     if (data.type === 'chat') {
-      // Route to the correct room
-      const roomId = data.roomId || activeRoom?.id;
-      receive(data.text, data.sender || 'Peer', roomId);
+      receive(data.text, data.sender || 'Peer', data.roomId);
     }
   });
-
   conn.on('close', () => {
     state.connections.delete(peerId);
     activeConns.delete(peerId);
-    if (activeRoom && activeRoom.peerIds.includes(peerId)) {
-      setStatus(false, 'Disconnected');
-    }
+    if (activeRoom && activeRoom.peerIds.indexOf(peerId) !== -1) setStatus(false, 'Disconnected');
   });
 }
 
 // ============================================================
-//  PREPARE MODAL
+//  MODAL
 // ============================================================
 function prepareModal() {
   const avatarEl = document.getElementById('chatAvatar');
@@ -225,133 +197,98 @@ function prepareModal() {
   const input = document.getElementById('chatInput');
 
   if (avatarEl) {
-    avatarEl.textContent = activeRoom?.avatar || '?';
-    avatarEl.classList.toggle('bt', activeRoom?.type === 'local');
+    avatarEl.textContent = activeRoom ? activeRoom.avatar : '?';
+    avatarEl.classList.toggle('bt', activeRoom && activeRoom.type === 'local');
   }
-  if (nameEl) nameEl.textContent = activeRoom?.title || 'Chat';
+  if (nameEl) nameEl.textContent = activeRoom ? activeRoom.title : 'Chat';
   if (box) box.innerHTML = '';
   if (input) input.value = '';
-
   setStatus(false, 'Connecting...');
-
   document.getElementById('chatModal')?.classList.add('active');
-  setTimeout(() => input?.focus(), 250);
+  setTimeout(() => input && input.focus(), 250);
 }
 
 // ============================================================
 //  SEND
 // ============================================================
-function sendCurrentMessage() {
+async function sendCurrentMessage() {
   const input = document.getElementById('chatInput');
-  if (!input) return;
+  if (!input || !activeRoom) return;
   const text = input.value.trim();
-  if (!text || !activeRoom) return;
+  if (!text) return;
 
-  // Render locally
+  if (!session.isLoggedIn()) { showToast('Sign in to send messages', 'error'); return; }
+
   addBubble(text, state.userName, 'me');
 
-  // Own lane — no delivery
-  if (activeRoom.mine) {
-    if (!ownLaneHintShown) {
-      addSystemBubble('(Your own lane - only you see this)');
-      ownLaneHintShown = true;
-    }
-    saveToCloud(activeRoom.id, text, state.userName);
+  if (activeRoom.type === 'own') {
+    if (!ownLaneHintShown) { addSystemBubble('(Your own lane - only you see this)'); ownLaneHintShown = true; }
+    await saveToCloud(activeRoom.id, text);
     input.value = '';
     return;
   }
 
-  // Build payload with roomId so receiver routes it correctly
-  const payload = {
-    type: 'chat',
-    text: text,
-    sender: state.userName,
-    senderVehicle: state.vehicle,
-    roomId: activeRoom.id,
-  };
-
+  const payload = { type: 'chat', text: text, sender: state.userName, senderVehicle: state.vehicle, roomId: activeRoom.id };
   let delivered = 0;
 
-  // Local mesh: broadcast to every local connection
   if (activeRoom.type === 'local' && state.localConns) {
     for (const conn of state.localConns.values()) {
-      if (conn.open) {
-        try { conn.send(payload); delivered++; } catch (e) {}
-      }
+      if (conn.open) { try { conn.send(payload); delivered++; } catch (e) {} }
     }
     if (delivered === 0) addSystemBubble('(No neighbours connected)');
   } else {
-    // Lane / Personal: send to target peers
     for (const pid of activeRoom.peerIds) {
       const conn = activeConns.get(pid) || state.connections.get(pid);
-      if (conn && conn.open) {
-        try { conn.send(payload); delivered++; } catch (e) {}
-      }
+      if (conn && conn.open) { try { conn.send(payload); delivered++; } catch (e) {} }
     }
-    if (delivered === 0) {
-      addSystemBubble('(Not delivered - peer offline. Message saved.)');
-    }
+    if (delivered === 0) addSystemBubble('(Not delivered - peer offline. Message saved.)');
   }
 
-  // Always persist
-  saveToCloud(activeRoom.id, text, state.userName);
+  await saveToCloud(activeRoom.id, text);
   input.value = '';
 }
 
 // ============================================================
-//  RECEIVE (called from app.js bridge OR local conn handler)
+//  RECEIVE
 // ============================================================
 export function receive(text, sender, roomId) {
   if (!text) return;
-
-  // If the chat modal is open for this room, append live
-  if (activeRoom && activeRoom.id === roomId) {
-    addBubble(text, sender || 'Peer', 'them');
-  }
-
-  // Always persist
+  if (activeRoom && activeRoom.id === roomId) addBubble(text, sender || 'Peer', 'them');
   saveToCloud(roomId, text, sender);
-
-  // Notify if hidden
   notifyIfHidden(sender, text);
 }
 
 // ============================================================
-//  PERSIST TO CLOUD
+//  PERSIST
 // ============================================================
 async function saveToCloud(roomId, text, sender) {
-  if (!roomId || !text) return;
+  if (!roomId || !text || !session.isLoggedIn()) return;
   try {
     await api.sendMessage({
       id: 'm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-      roomId: String(roomId),
-      from: state.vehicle || state.phone || 'anon',
-      to: 'ALL',
+      roomId: roomId,
+      text: text,
       sender: sender || state.userName,
-      text: String(text).slice(0, 1000),
       ts: Date.now(),
     });
-  } catch (e) {
-    // silent - offline persistence is best-effort
-  }
+  } catch (e) { /* silent */ }
 }
 
 // ============================================================
-//  LOAD HISTORY
+//  HISTORY
 // ============================================================
 async function loadHistory(roomId) {
   if (!roomId) return;
+  if (!session.isLoggedIn()) { addSystemBubble('Sign in to see message history'); return; }
+
   const box = document.getElementById('chatMessages');
   if (!box) return;
 
   const history = await api.getMessages(roomId, 50);
   if (!Array.isArray(history) || !history.length) return;
 
-  // Skip any we already showed live
   const already = new Set();
-  box.querySelectorAll('.chat-msg[data-ts]').forEach(el => {
-    already.add(String(el.dataset.ts));
-  });
+  box.querySelectorAll('.chat-msg[data-ts]').forEach(el => already.add(String(el.dataset.ts)));
 
   history.forEach(m => {
     const ts = String(m.ts || '');
@@ -359,7 +296,6 @@ async function loadHistory(roomId) {
     const side = String(m.from) === String(state.vehicle) ? 'me' : 'them';
     addBubble(m.text, m.sender || 'Peer', side, ts, false);
   });
-
   box.scrollTop = box.scrollHeight;
 }
 
@@ -370,12 +306,10 @@ function addBubble(text, sender, side, tsOverride, scroll) {
   if (scroll === undefined) scroll = true;
   const box = document.getElementById('chatMessages');
   if (!box) return;
-
   const div = document.createElement('div');
   div.className = 'chat-msg ' + side;
   const ts = tsOverride || String(Date.now());
   div.dataset.ts = ts;
-
   const time = new Date(Number(ts)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   if (side === 'me') {
@@ -386,7 +320,6 @@ function addBubble(text, sender, side, tsOverride, scroll) {
       escapeHtml(text) +
       '<div class="time">' + time + '</div>';
   }
-
   box.appendChild(div);
   if (scroll) box.scrollTop = box.scrollHeight;
 }
@@ -401,9 +334,6 @@ function addSystemBubble(text) {
   box.scrollTop = box.scrollHeight;
 }
 
-// ============================================================
-//  STATUS + NOTIFICATIONS
-// ============================================================
 function setStatus(online, text, variant) {
   const wrap = document.getElementById('chatStatusWrap');
   const status = document.getElementById('chatStatus');
@@ -418,35 +348,21 @@ function notifyIfHidden(sender, text) {
   if (!('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
   if (storage.raw('notif-chat', 'true') === 'false') return;
-  try {
-    new Notification('Steeradar', {
-      body: (sender || 'Peer') + ': ' + text,
-      icon: CFG.LOGO_URL,
-    });
-  } catch (e) {}
+  try { new Notification('Steeradar', { body: (sender || 'Peer') + ': ' + text, icon: CFG.LOGO_URL }); } catch (e) {}
 }
 
-// ============================================================
-//  CLOSE
-// ============================================================
 export function closeChat() {
   document.getElementById('chatModal')?.classList.remove('active');
   activeRoom = null;
   activeConns.clear();
 }
 
-// ============================================================
-//  UTILS
-// ============================================================
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
 }
 
-// ============================================================
-//  PUBLIC API
-// ============================================================
 export const chat = {
   init: initChat,
   openLane: openChatForLane,
@@ -455,5 +371,4 @@ export const chat = {
   receive: receive,
   close: closeChat,
   get activeRoomId() { return activeRoom ? activeRoom.id : null; },
-  get activePeerId() { return activeRoom && activeRoom.peerIds.length ? activeRoom.peerIds[0] : null; },
 };
