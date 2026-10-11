@@ -1,24 +1,17 @@
-// config.js — Steeradar shared configuration
-//
-// SECURITY NOTE (v6.1): there is intentionally NO secret in this file.
-// Anything in a browser-delivered file is public. Authentication is done with
-// per-user session tokens (see js/api.js and Code.gs).
-//
-// IMPORTANT: after deploying the new Code.gs, paste YOUR new /exec URL below.
-// The old URL (and the old "steeradar-secret-2026" key, which is still in git
-// history) belong to the previous insecure backend — retire that deployment.
+// config.js - Steeradar shared configuration
 window.STEERADAR = {
-  SHEET_API_URL: 'https://script.google.com/macros/s/AKfycbwq7bhzuAaZIon7-uOyDrr-a7dzM6jwFdsRr8vqUwpE5nUGawFB-asoJW8UXZohrKrX/exec',
-  CLOUD_SYNC_DEFAULT: true,
+  // Backend URL only - no secret. v6.1 uses per-user tokens.
+  SHEET_API_URL: 'https://script.google.com/macros/s/AKfycbwMv45uY5nlbXRL12H-zZxfu9KeVIm2o9i3n_kqfw9Xd-4KfS_YK4iD67GfGbmCYtix/exec',
 
+  CLOUD_SYNC_DEFAULT: true,
   APP_NAME: 'Steeradar',
-  APP_VERSION: 'v6.1',
-  LOGO_URL: 'https://raw.githubusercontent.com/suryasticsai/Steeradar/main/steerardar-logo.png',
+  APP_VERSION: 'v7.0',
+  LOGO_URL: './steerardar-logo.png',
 
   MAP_STYLE_BRIGHT: 'https://tiles.openfreemap.org/styles/bright',
   MAP_STYLE_DARK:   'https://tiles.openfreemap.org/styles/dark',
   DEFAULT_CENTER:   { lat: 12.9716, lng: 77.5946 },
-  DEFAULT_ZOOM:     12,
+  DEFAULT_ZOOM:     13,
 
   CLOUD_POLL_INTERVAL_MS: 15000,
   PRESENCE_INTERVAL_MS:   20000,
