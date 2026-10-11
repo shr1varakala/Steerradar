@@ -1,0 +1,16 @@
+name: Unzip
+
+on:
+  workflow_dispatch:   # lets you tap "Run workflow" from your phone
+  push:
+    paths:
+      - 'your-file.zip'
+
+jobs:
+  unzip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unzip
+        run: unzip your-file.zip -d extracted
