@@ -6,13 +6,12 @@ import {
   loadLanes, loadHive, saveLanes, saveHive,
   setTimer, clearTimer,
   getVehicleType, geohash, normalizeVehicle, validateVehicle,
-  dmRoomId, vehicleFromPeerId,
 } from './store.js';
 
 import { initOnboarding } from './onboarding.js';
 import { initAuth, openAuthSheet, logout, validateSessionOnBoot } from './auth.js';
 import { lanes, initEditLane } from './lanes.js';
-import { chat } from './chat.js';
+import { chat, closeChat } from './chat.js';
 import { hive } from './hive.js';
 import { presence } from './presence.js';
 import { logger } from './logger.js';
@@ -20,24 +19,6 @@ import { logger } from './logger.js';
 const CFG = window.STEERADAR || {};
 
 let _booted = false;
-
-// Cross-module bridge (lanes.js, presence.js, hive.js and logger.js call these).
-// Before v6.1 this object was referenced everywhere but never created, which
-// silently broke Chat, Track, Hive broadcast and the log "Copy" toast.
-window.Steeradar = {
-  chat, presence, hive, lanes, showToast,
-  broadcastToAllPeers: (payload) => presence.broadcast(payload),
-};
-// Local-mesh chat: presence.js hands inbound messages to chat.js
-presence.onPeerMessage((text, sender, roomId) => chat.receive(text, sender, roomId));
-
-// Server says our session is gone → sign out locally instead of failing silently.
-window.addEventListener('steeradar:unauthorized', () => {
-  if (!session.isLoggedIn()) return;
-  session.clear();
-  updateAvatar();
-  showToast('Session expired — please sign in again', 'error');
-});
 
 // ============================================================
 //  GLOBAL ERROR HANDLERS
@@ -53,6 +34,7 @@ window.addEventListener('unhandledrejection', (e) => {
 //  MODAL CLOSE BUTTONS
 // ============================================================
 function initModalCloseButtons() {
+  // Every data-close button
   document.querySelectorAll('[data-close]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -60,21 +42,27 @@ function initModalCloseButtons() {
       const sel = btn.getAttribute('data-close');
       const target = document.querySelector(sel);
       if (target) target.classList.remove('active');
+      if (sel === '#chatModal') {
+        try { closeChat(); } catch (err) {}
+      }
     });
   });
 
+  // Click outside to close
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) overlay.classList.remove('active');
     });
   });
 
+  // Escape key
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
     }
   });
 
+  // Auth close (has its own id)
   const authClose = document.getElementById('authClose');
   if (authClose) {
     authClose.addEventListener('click', () => {
@@ -103,15 +91,15 @@ function unlockApp() {
   try {
     document.getElementById('onboardGate')?.classList.add('gate-hidden');
 
-    // Load from local storage
+    // Load local cache
     try { lanes.loadFromStorage(); } catch (e) { console.warn(e); }
     try { hive.loadFromStorage(); } catch (e) { console.warn(e); }
 
-    // Init logger first so it captures everything
+    // Logger first so it captures everything
     try { logger.init(); } catch (e) { console.warn(e); }
     initModalCloseButtons();
 
-    // Init feature modules - each wrapped so one failure doesn't kill the app
+    // Init feature modules (each wrapped so one failure doesn't kill the app)
     try { lanes.init(); } catch (e) { console.warn('lanes.init:', e); }
     try { hive.init(); } catch (e) { console.warn('hive.init:', e); }
     try { chat.init(); } catch (e) { console.warn('chat.init:', e); }
@@ -155,7 +143,9 @@ function unlockApp() {
       } else {
         startCloudPolling();
         syncAll(true);
-        if (state.map) setTimeout(() => { try { state.map.invalidateSize(); } catch (e) {} }, 100);
+        if (state.map) {
+          setTimeout(() => { try { state.map.invalidateSize(); } catch (e) {} }, 100);
+        }
       }
     });
 
@@ -189,8 +179,10 @@ function wireHeaderActions() {
     if (!('Notification' in window)) { showToast('Notifications not supported', 'error'); return; }
     if (Notification.permission === 'granted') { showToast('Notifications are on'); return; }
     const p = await Notification.requestPermission();
-    showToast(p === 'granted' ? 'Notifications enabled' : 'Notifications blocked',
-              p === 'granted' ? 'success' : 'error');
+    showToast(
+      p === 'granted' ? 'Notifications enabled' : 'Notifications blocked',
+      p === 'granted' ? 'success' : 'error'
+    );
   });
 
   document.getElementById('avatarBtn')?.addEventListener('click', openSettings);
@@ -211,7 +203,9 @@ function wireHeaderActions() {
         if (newGh !== state.userGeohash) {
           showToast('Entering new neighbourhood');
           setTimeout(() => location.reload(), 800);
-        } else showToast('Location updated', 'success');
+        } else {
+          showToast('Location updated', 'success');
+        }
       },
       () => showToast('Enable location to update', 'error'),
       { enableHighAccuracy: true, timeout: 8000 }
@@ -221,7 +215,7 @@ function wireHeaderActions() {
   document.getElementById('mapRefresh')?.addEventListener('click', function () {
     this.classList.add('spinning');
     refreshMapStyle();
-    if (state.map) try { state.map.invalidateSize(); } catch (e) {}
+    if (state.map) { try { state.map.invalidateSize(); } catch (e) {} }
     try { lanes.renderMarkers(); } catch (e) {}
     lanes.hideCard();
     setTimeout(() => this.classList.remove('spinning'), 900);
@@ -253,12 +247,17 @@ function initMap() {
 
   // Try MapLibre GL vector tiles, fall back to OSM raster
   try {
-    state.mapLibreLayer = L.maplibreGL({ style: getMapStyle(), interactive: false }).addTo(state.map);
+    state.mapLibreLayer = L.maplibreGL({
+      style: getMapStyle(),
+      interactive: false,
+    }).addTo(state.map);
   } catch (e) {
     console.warn('MapLibre failed, falling back to OSM tiles:', e);
     try {
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(state.map);
-    } catch (e2) { console.error('Fallback tiles also failed:', e2); }
+    } catch (e2) {
+      console.error('Fallback tiles also failed:', e2);
+    }
   }
 
   setTimeout(() => { try { state.map.invalidateSize(); } catch (e) {} }, 100);
@@ -275,7 +274,10 @@ function refreshMapStyle() {
 
   // Add new layer with safety guards
   try {
-    state.mapLibreLayer = L.maplibreGL({ style: getMapStyle(), interactive: false }).addTo(state.map);
+    state.mapLibreLayer = L.maplibreGL({
+      style: getMapStyle(),
+      interactive: false,
+    }).addTo(state.map);
 
     // NOTE: bringToBack() is NOT supported by maplibre-gl-leaflet; guard just in case
     if (state.mapLibreLayer && typeof state.mapLibreLayer.bringToBack === 'function') {
@@ -343,14 +345,18 @@ function finishGeolocation(lat, lng) {
 }
 
 function reverseGeocode(lat, lng) {
-  fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng + '&zoom=14', {
-    headers: { 'Accept': 'application/json' },
-  })
+  fetch(
+    'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng + '&zoom=14',
+    { headers: { 'Accept': 'application/json' } }
+  )
     .then(r => r.json())
     .then(data => {
       if (data && data.address) {
         const a = data.address;
-        const parts = [a.suburb || a.neighbourhood || a.village, a.city || a.town || a.state_district].filter(Boolean);
+        const parts = [
+          a.suburb || a.neighbourhood || a.village,
+          a.city || a.town || a.state_district,
+        ].filter(Boolean);
         setText('locText', parts.length ? parts.join(', ') : 'Your location');
       }
     })
@@ -373,7 +379,9 @@ function wireTabs() {
       try { lanes.hideCard(); } catch (e) {}
 
       if (tab === 'pulse') {
-        setTimeout(() => { if (state.map) try { state.map.invalidateSize(); } catch (e) {} }, 150);
+        setTimeout(() => {
+          if (state.map) { try { state.map.invalidateSize(); } catch (e) {} }
+        }, 150);
       } else if (tab === 'lanes') {
         try { lanes.render(); } catch (e) {}
       } else if (tab === 'near') {
@@ -431,8 +439,10 @@ function wireFab() {
         text: state.userName + ' is now visible nearby',
         sender: state.userName,
       });
-      showToast(sent ? 'Broadcast to ' + sent + ' neighbour' + (sent === 1 ? '' : 's') : 'You are visible nearby',
-                'success');
+      showToast(
+        sent ? 'Broadcast to ' + sent + ' neighbour' + (sent === 1 ? '' : 's') : 'You are visible nearby',
+        'success'
+      );
     } else {
       try { hive.openCompose(); } catch (e) { showToast('Could not open compose', 'error'); }
     }
@@ -450,6 +460,7 @@ function wireTrackingHud() {
   document.getElementById('trackChat')?.addEventListener('click', () => {
     const id = state.trackedLaneId;
     if (!id) return;
+
     let target = state.lanes.find(l => l.id === id);
     if (!target && id.indexOf('peer-') === 0) {
       const vehicle = id.replace('peer-', '');
@@ -457,19 +468,27 @@ function wireTrackingHud() {
     }
     if (!target) return;
 
-    const fakeLane = {
-      id: 'peer-' + (target.vehicle || target.id),
-      driver: target.name || target.driver,
-      avatar: target.avatar,
-      phone: target.phone,
-      vehicle: target.vehicle,
-      vehicleType: target.vehicleType,
-      peerId: target.peerId,
-      mine: false,
-      route: { from: '', via: [], to: 'Direct chat' },
-      seats: { total: 0, taken: 0 },
-    };
-    try { chat.openLane(fakeLane); } catch (e) {}
+    // Prefer opening a personal DM if we have a vehicle id
+    if (target.vehicle && target.vehicle !== state.vehicle) {
+      chat.openPersonal(
+        target.vehicle,
+        target.name || target.driver,
+        target.avatar,
+        target.peerId
+      );
+    } else {
+      // Fallback: open as a lane chat
+      chat.openLane({
+        id: target.id,
+        driver: target.name || target.driver,
+        avatar: target.avatar,
+        peerId: target.peerId,
+        vehicle: target.vehicle,
+        mine: false,
+        route: { from: '', via: [], to: 'Direct chat' },
+        seats: { total: 0, taken: 0 },
+      });
+    }
   });
 }
 
@@ -516,7 +535,12 @@ function wireSettings() {
     const ok = await api.ping();
     if (ok) {
       const dbg = await api.debug();
-      setCloudStatus('Connected - ' + (dbg && dbg.lanes ? dbg.lanes : 0) + ' lanes, ' + (dbg && dbg.hive ? dbg.hive : 0) + ' posts', 'ok');
+      setCloudStatus(
+        'Connected - ' +
+          (dbg && dbg.lanes ? dbg.lanes : 0) + ' lanes, ' +
+          (dbg && dbg.hive ? dbg.hive : 0) + ' posts',
+        'ok'
+      );
     } else {
       setCloudStatus('Failed - ' + (api.lastError || 'unknown'), 'err');
     }
@@ -534,7 +558,9 @@ function wireSettings() {
 
   document.getElementById('setResetAll')?.addEventListener('click', () => {
     if (!confirm('Reset everything? You will see onboarding again.')) return;
-    Object.keys(localStorage).filter(k => k.indexOf('steeradar-') === 0).forEach(k => localStorage.removeItem(k));
+    Object.keys(localStorage)
+      .filter(k => k.indexOf('steeradar-') === 0)
+      .forEach(k => localStorage.removeItem(k));
     location.reload();
   });
 
@@ -556,10 +582,14 @@ function openSettings() {
   set('setVehicle', state.vehicle);
 
   const theme = storage.raw('theme', 'light');
-  document.querySelectorAll('#setTheme button').forEach(b => b.classList.toggle('active', b.dataset.value === theme));
+  document.querySelectorAll('#setTheme button').forEach(b =>
+    b.classList.toggle('active', b.dataset.value === theme)
+  );
 
   const mapStyle = storage.raw('map-style', 'bright');
-  document.querySelectorAll('#setMapStyle button').forEach(b => b.classList.toggle('active', b.dataset.value === mapStyle));
+  document.querySelectorAll('#setMapStyle button').forEach(b =>
+    b.classList.toggle('active', b.dataset.value === mapStyle)
+  );
 
   const toggle = (id, val) => { const el = document.getElementById(id); if (el) el.checked = val; };
   toggle('setNotifChat',  storage.raw('notif-chat', 'true') !== 'false');
@@ -572,9 +602,13 @@ function openSettings() {
   toggle('setCloudSync',  CFG.CLOUD_SYNC_DEFAULT === true || storage.raw('cloud-enabled', '') === 'true');
 
   set('setCloudUrl', api.url);
+  set('setCloudKey', api.key);
 
   if (api.url) {
-    setCloudStatus(state.cloudOnline ? 'Cloud sync on' : ('Offline - ' + (state.cloudLastError || '')), state.cloudOnline ? 'ok' : 'err');
+    setCloudStatus(
+      state.cloudOnline ? 'Cloud sync on' : ('Offline - ' + (state.cloudLastError || '')),
+      state.cloudOnline ? 'ok' : 'err'
+    );
   } else {
     setCloudStatus('Not configured', 'err');
   }
@@ -582,17 +616,21 @@ function openSettings() {
   document.getElementById('settingsModal')?.classList.add('active');
 }
 
-async function saveSettings() {
+function saveSettings() {
   const name = document.getElementById('setName')?.value.trim();
   if (name) {
-    const changed = name !== state.userName;
     state.userName = name;
     storage.setRaw('name', name);
     updateAvatar();
-    if (changed && session.isLoggedIn()) { try { await api.updateMe({ name }); } catch (e) {} }
   }
 
-  // Persist every toggle first, so a vehicle change + reload can't drop them.
+  const v = normalizeVehicle(document.getElementById('setVehicle')?.value || '');
+  if (v && validateVehicle(v) && v !== state.vehicle) {
+    storage.setRaw('vehicle', v);
+    setTimeout(() => location.reload(), 400);
+    return;
+  }
+
   storage.setRaw('notif-chat', document.getElementById('setNotifChat')?.checked);
   storage.setRaw('notif-seats', document.getElementById('setNotifSeats')?.checked);
   storage.setRaw('share-gps', document.getElementById('setShareGps')?.checked);
@@ -607,33 +645,18 @@ async function saveSettings() {
   const devBlock = document.getElementById('devModeBlock');
   if (devBlock && devBlock.style.display === 'block') {
     const url = document.getElementById('setCloudUrl')?.value.trim();
-    if (url && url !== CFG.SHEET_API_URL) storage.setRaw('cloud-url', url); else storage.removeRaw('cloud-url');
+    const key = document.getElementById('setCloudKey')?.value.trim();
+    if (url && url !== CFG.SHEET_API_URL) storage.setRaw('cloud-url', url);
+    else storage.removeRaw('cloud-url');
+    if (key && key !== CFG.SHEET_WEBHOOK_SECRET) storage.setRaw('cloud-key', key);
+    else storage.removeRaw('cloud-key');
     if (url) api.url = url;
-  }
-
-  // Vehicle change: the server enforces one plate per account.
-  const v = normalizeVehicle(document.getElementById('setVehicle')?.value || '');
-  if (v && validateVehicle(v) && v !== state.vehicle) {
-    if (session.isLoggedIn()) {
-      const r = await api.updateMe({ vehicle: v });
-      if (!r || r.ok === false) {
-        showToast(r?.error === 'vehicle_taken'
-          ? 'That vehicle number belongs to another account'
-          : 'Could not change vehicle: ' + (api.lastError || r?.error || 'error'), 'error');
-        return;
-      }
-    }
-    storage.setRaw('vehicle', v);
-    showToast('Vehicle updated — reloading', 'success');
-    setTimeout(() => location.reload(), 500);
-    return;
+    if (key) api.key = key;
   }
 
   document.getElementById('settingsModal')?.classList.remove('active');
   showToast('Settings saved', 'success');
   startCloudPolling();
-  // Apply ghost/GPS choices to live presence right away.
-  try { presence.stop(); presence.start(); } catch (e) {}
 }
 
 function setCloudStatus(text, variant) {
@@ -665,7 +688,8 @@ async function scanBluetooth() {
   if (!navigator.bluetooth) { showToast('Web Bluetooth not supported', 'error'); return; }
   const btn = document.getElementById('btScanBtn');
   if (!btn) return;
-  btn.disabled = true; btn.textContent = 'Scanning...';
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
   try {
     const device = await navigator.bluetooth.requestDevice({
       acceptAllDevices: true,
@@ -676,7 +700,8 @@ async function scanBluetooth() {
         id: device.id,
         name: device.name || 'Unknown device',
         connected: false,
-        device,
+        rssi: -Math.floor(40 + Math.random() * 50),
+        device: device,
       });
     }
     renderBluetooth();
@@ -703,11 +728,11 @@ function renderBluetooth() {
     return;
   }
   wrap.innerHTML = state.btDevices.map(d => (
-    '<div class="bt-device" data-id="' + escapeHtml(d.id) + '">' +
+    '<div class="bt-device" data-id="' + d.id + '">' +
       '<div class="bt-icon">' + (d.connected ? '🔗' : '📶') + '</div>' +
       '<div class="bt-info">' +
         '<div class="bt-name">' + escapeHtml(d.name) + '</div>' +
-        '<div class="bt-meta">' + (d.connected ? 'Connected' : 'Nearby') + '</div>' +
+        '<div class="bt-meta">' + (d.connected ? 'Connected' : 'RSSI ' + d.rssi + ' dBm') + '</div>' +
       '</div>' +
       '<button class="bt-action" data-action="toggle">' + (d.connected ? 'Drop' : 'Connect') + '</button>' +
     '</div>'
@@ -721,7 +746,9 @@ function renderBluetooth() {
         if (dev.connected) { dev.device.gatt.disconnect(); dev.connected = false; }
         else { await dev.device.gatt.connect(); dev.connected = true; }
         renderBluetooth();
-      } catch (e) { showToast('Bluetooth action failed', 'error'); }
+      } catch (e) {
+        showToast('Bluetooth action failed', 'error');
+      }
     });
   });
 }
@@ -733,8 +760,12 @@ function initPeer() {
   if (typeof Peer === 'undefined') { console.warn('PeerJS not loaded'); return; }
   const id = 'steeradar-veh-' + state.vehicle;
   state.peerId = id;
-  try { state.peer = new Peer(id, { debug: 0 }); }
-  catch (e) { console.warn('Peer init failed:', e); return; }
+  try {
+    state.peer = new Peer(id, { debug: 0 });
+  } catch (e) {
+    console.warn('Peer init failed:', e);
+    return;
+  }
 
   state.peer.on('open', () => {
     setConnBadge(true, 'Online');
@@ -753,10 +784,14 @@ function initPeer() {
       try { state.peer.destroy(); } catch (e) {}
       const newId = id + '-' + Math.random().toString(36).slice(2, 6);
       state.peerId = newId;
-      try { state.peer = new Peer(newId, { debug: 0 }); } catch (e) { return; }
+      try { state.peer = new Peer(newId, { debug: 0 }); }
+      catch (e) { return; }
       state.peer.on('open', () => setConnBadge(true, 'Online'));
       state.peer.on('connection', (c) => {
-        c.on('open', () => { state.connections.set(c.peer, c); attachPeerHandlers(c); });
+        c.on('open', () => {
+          state.connections.set(c.peer, c);
+          attachPeerHandlers(c);
+        });
       });
     } else if (err.type !== 'peer-unavailable') {
       setConnBadge(false, 'Connection issue');
@@ -770,37 +805,18 @@ function initPeer() {
 }
 
 function attachPeerHandlers(conn) {
-  // Who is this? Prefer the vehicle they declared when dialling us.
-  const fromVehicle = String((conn.metadata && conn.metadata.vehicle) || vehicleFromPeerId(conn.peer)).toUpperCase().slice(0, 15);
-  const str = (v, n) => String(v == null ? '' : v).slice(0, n);
-
   conn.on('data', (data) => {
     if (!data || typeof data !== 'object') return;
 
-    if (data.type === 'chat' && typeof data.text === 'string') {
-      const room = dmRoomId(state.vehicle, fromVehicle);
-      try { chat.receive(data.text, str(data.sender, 40), room); } catch (e) {}
-
-    } else if (data.type === 'hive-post' && data.post && typeof data.post === 'object') {
-      const p = data.post;
-      const id = str(p.id, 64);
-      if (!/^hive-[A-Za-z0-9_-]{4,60}$/.test(id)) return;
-      if (state.hivePosts.find(x => x.id === id)) return;
-      // Rebuild the object from whitelisted, length-capped fields only.
-      state.hivePosts.push({
-        id, own: false,
-        name: str(p.name, 40) || 'Driver',
-        avatar: str(p.avatar, 2) || 'D',
-        title: str(p.title, 80),
-        text: str(p.text, 2000),
-        tags: Array.isArray(p.tags) ? p.tags.slice(0, 5).map(t => str(t, 24)) : [],
-        time: 'just now',
-        likes: 0,
-        ts: Date.now(),
-        vehicle: '',
-      });
-      saveHive();
-      try { hive.render(); } catch (e) {}
+    if (data.type === 'chat') {
+      // Route to chat.receive() with the room id from the payload
+      try { chat.receive(data.text, data.sender, data.roomId); } catch (e) {}
+    } else if (data.type === 'hive-post') {
+      if (!state.hivePosts.find(p => p.id === data.post.id)) {
+        state.hivePosts.push(data.post);
+        saveHive();
+        try { hive.render(); } catch (e) {}
+      }
     }
   });
   conn.on('close', () => state.connections.delete(conn.peer));
@@ -874,12 +890,12 @@ function wireDevMode() {
 
   document.getElementById('cloudSaveDev')?.addEventListener('click', () => {
     const url = document.getElementById('setCloudUrl')?.value.trim();
-    if (!url || !/^https:\/\/script\.google\.com\//.test(url)) {
-      showToast('Enter a https://script.google.com/… URL', 'error');
-      return;
-    }
+    const key = document.getElementById('setCloudKey')?.value.trim();
+    if (!url || !key) { showToast('Both fields required', 'error'); return; }
     storage.setRaw('cloud-url', url);
+    storage.setRaw('cloud-key', key);
     api.url = url;
+    api.key = key;
     showToast('Endpoint saved - reloading', 'success');
     setTimeout(() => location.reload(), 600);
   });
@@ -895,7 +911,11 @@ function setText(id, value) {
 
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
   }[c]));
 }
 
