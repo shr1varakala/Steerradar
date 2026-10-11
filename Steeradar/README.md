@@ -1,0 +1,357 @@
+# Steeradar
+
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/suryasticsai/Steeradar/main/steerardar-logo.png" alt="Steeradar" width="140" height="140" />
+
+### Live community rides. Peer chat. Local mesh. Universal DB.
+
+**A vehicle-gated, modular, serverless-first community network — built in plain HTML, CSS & JavaScript.**
+
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-suryasticsai.github.io-0D9488?style=for-the-badge&logo=github)](https://suryasticsai.github.io/Steeradar/)
+[![License](https://img.shields.io/badge/License-MIT-111827?style=for-the-badge)](./LICENSE)
+[![Made with](https://img.shields.io/badge/Made%20with-Vanilla%20JS-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
+[![Modules](https://img.shields.io/badge/Modules-11-7C3AED?style=for-the-badge)](./js)
+[![No Build](https://img.shields.io/badge/No-Build%20Step-4F46E5?style=for-the-badge)](https://github.com/suryasticsai/Steeradar)
+
+</div>
+
+---
+
+## 📖 What is Steeradar
+
+Steeradar is a **community movement protocol**. Any group that repeats a local journey — a bus route, a carpool, a jogging pack, a walk, a delivery run, an event shuttle — gets a live, discoverable **lane** that anyone nearby can join.
+
+Built on plain web primitives — WebRTC, Geolocation, Bluetooth, and a single Google Sheet as the universal database — Steeradar runs entirely from **GitHub Pages** with **zero backend infrastructure**, **zero commission**, and **zero login wall**.
+
+> **Enter your vehicle number → your neighbourhood comes alive.**
+
+---
+
+## ✨ Features
+
+### 🚗 Vehicle Gate
+The app unlocks only after a valid vehicle number. It becomes your identity — your lanes, your Hive posts, your peer ID.
+
+### 📷 Photo Documents
+Optional onboarding step for your photo, vehicle photo, number plate and UPI QR. Previews stay on your device; when signed in they are backed up as **private** Drive files.
+
+### 🗺️ Pulse — Live Community Map
+Bright OpenFreeMap canvas with emoji markers for every active lane. Real-time movement animations, pulsing rings, filters: **Live now · All · Has seats · My lanes**.
+
+### 🛣️ Lanes — Real-Time Driver Feed
+Editorial cards with animated occupancy rings, vehicle-type badges, route previews, fare tags, and one-tap Chat / Track / Request. **Edit your own lanes inline.**
+
+### 📍 Live Tracking (Zomato-style)
+Tap **Track** on any lane → OSRM routing draws the real driving path to your pickup, with live distance, ETA, and seat count in a floating HUD.
+
+### 📡 Near — Local Mesh & Proximity Radar
+Your GPS coordinate becomes a **geohash** — everyone within ~1 km auto-forms a PeerJS room without any server. Includes **real Web Bluetooth scan**.
+
+### 🐝 Hive — Community Board
+Deepstash-style editorial feed. Story circles for active drivers. Single-form composer (heading + body + tags). **Edit and delete your own posts.**
+
+### 💬 Peer Chat with Persistence
+Real-time WebRTC delivery + every message saved to the `messages` sheet. Reopening a chat loads the last 50 messages.
+
+### ⚙️ Full Settings
+Account (OTP sign-in) · Profile · Appearance (theme + map style) · Notifications · Privacy (GPS, ghost mode, plate visibility) · Universal DB · Data (clear / reset).
+
+### 📋 Hidden Diagnostics
+Long-press the **Steeradar** logo for 600ms → in-app log viewer with **Copy · Clear · Refresh**. Tap the version line 5× in Settings → reveals the cloud endpoint config.
+
+---
+
+## 🏗️ Architecture
+
+### Modular JS — 11 small modules, no build step
+
+```
+js/
+├── api.js          · Network gateway (every fetch goes through here)
+├── store.js        · Shared state, storage, session, utils
+├── logger.js       · In-app console capture + log viewer
+├── auth.js         · OTP login / register flow
+├── onboarding.js   · Vehicle gate + photo step
+├── photos.js       · Image compression + Drive upload
+├── lanes.js        · Post/view lanes, edit, map markers
+├── hive.js         · Posts + likes + edit/delete
+├── chat.js         · WebRTC + persistent messages
+├── presence.js     · Live tracking + geohash mesh
+└── app.js          · Boot, tabs, settings, wiring
+```
+
+Modules import only what they need and talk to each other through the `window.Steeradar` bridge set up in `app.js`.
+
+### Peer layers
+
+```
+PEER A — Vehicle ID
+  steeradar-veh-<VEHICLE>
+  Used for: lane chats (1:1 WebRTC)
+
+PEER B — Geohash Room Slot
+  steeradar-loc-<geohash>-<slot 1..20>
+  Used for: local mesh (auto-forms within ~1 km)
+
+PEER C — Bluetooth
+  navigator.bluetooth.requestDevice()
+  Used for: proximity scan of BLE peripherals
+```
+
+### Cloud sync flow
+
+```
+Publish lane → save local → (signed in) push to Apps Script → row in Google Sheet
+              ↓
+Every 15s:  fetch lanes + posts → merge → re-render
+Every 20s:  heartbeat presence with GPS + vehicle type
+```
+
+### Live tracking flow
+
+```
+Tap Track → draw pickup pin + vehicle pin
+          → OSRM fetch driving route (free, no key)
+          → draw teal dashed polyline
+          → recompute every 8s as vehicle moves
+          → HUD shows distance / ETA / seats
+```
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Markup | HTML5 |
+| Styling | Vanilla CSS (light-first, Deepstash-inspired) |
+| Logic | Vanilla JavaScript (ES Modules, ES2020) |
+| Maps | [Leaflet](https://leafletjs.com/) + [MapLibre GL](https://maplibre.org/) |
+| Tiles | [OpenFreeMap](https://openfreemap.org/) — no API key |
+| Routing | [OSRM](https://project-osrm.org/) — free, no signup |
+| Geocoding | [Nominatim](https://nominatim.org/) (OpenStreetMap) |
+| Real-time chat | [PeerJS](https://peerjs.com/) (WebRTC) |
+| Proximity mesh | Custom geohash + PeerJS slot claiming |
+| Bluetooth | Web Bluetooth API |
+| Universal DB | Google Apps Script + Sheets |
+| Image storage | Google Drive (via Apps Script) |
+| Hosting | GitHub Pages |
+
+**Zero build step. Zero npm. Zero bundlers.**
+
+---
+
+## 🚀 Quick Start
+
+### Run it live
+👉 **[https://suryasticsai.github.io/Steeradar/](https://suryasticsai.github.io/Steeradar/)**
+
+### Run locally
+```bash
+git clone https://github.com/suryasticsai/Steeradar.git
+cd Steeradar
+python3 -m http.server 8000
+# open http://localhost:8000
+```
+
+### Deploy your own
+1. Fork this repo
+2. **Settings → Pages → Source: `main` / root**
+3. Live in ~30 seconds at `https://<your-username>.github.io/Steeradar/`
+
+---
+
+## 🗄️ Backend Setup (hardened Apps Script — `Code.gs`)
+
+The backend lives in **[`Code.gs`](Code.gs)** in this repo. Setup takes ~5 minutes.
+
+> **Upgrading from v6.0?** The old deployment used a shared secret that was public in `config.js` and git history. Create a **new** project below, put the new `/exec` URL in `config.js`, and **delete/disable the old deployment**.
+
+1. Open **[script.new](https://script.new)** → rename to **Steeradar DB**.
+2. Delete the default code → paste the contents of `Code.gs` → **Ctrl + S**.
+3. Function dropdown → **`setup`** → **Run** → *Review permissions → Advanced → Go to project → Allow*.
+   (Creates the Google Sheet + all tabs, generates a private server-side pepper, installs the daily cleanup trigger. The Sheet URL is printed in the log.)
+4. **Deploy → New deployment → Web app** · Execute as: **Me** · Who has access: **Anyone**.
+   ("Anyone" only means the browser can reach it — every private action still needs a signed-in session token.)
+5. Copy the `/exec` URL into `config.js` → `SHEET_API_URL`. **There is no secret to configure.**
+6. Commit, push, hard-refresh → Settings → Universal DB → **Test connection**.
+
+**Mail quota:** OTP emails use `MailApp` (≈100/day on a free Google account); the server caps itself at 80/day and 5 per phone/email per hour.
+
+**Run the security tests** (no Google account needed): `node tests/backend.test.js`
+
+---
+
+## 📊 Sheet Schema
+
+| Sheet        | Purpose                                                                 |
+| ------------ | ----------------------------------------------------------------------- |
+| **users**    | phone, email, name, username, vehicle (unique), private photo file ids  |
+| **sessions** | SHA-256 **hashes** of 90-day tokens (raw tokens never stored)           |
+| **otps**     | hashed OTPs, expiry, attempts, verified/consumed flags                  |
+| **lanes**    | lanes with owner (private), vehicleType, GPS, lastSeen                  |
+| **hive**     | community posts + like counts                                           |
+| **likes**    | one row per (post, user) so likes can't be inflated                     |
+| **messages** | private DM / neighbourhood chat history (sender stamped by the server)  |
+| **presence** | active vehicles + GPS heartbeat (2-min freshness)                       |
+| **trips**    | start/end time, distance, fare, rating                                  |
+
+---
+
+## 🎯 Beyond buses — the real USP
+
+A vehicle number is one kind of persistent public identifier. The same pattern works for:
+
+| Activity | Identifier | Lane | Fare |
+|---|---|---|---|
+| Community bus | Bus reg | Route + occupancy | Ticket price |
+| Carpool | Car reg | Daily commute | Fuel share |
+| Auto pool | Auto reg | Shared trip | Split meter |
+| Walking group | Group name | Route + pace | Free |
+| Morning jog | Route ID | Pace + meetup | Free |
+| Cycling pack | Pack name | Route + speed | Free |
+| Event shuttle | Event code | Pickup points | Bundled |
+| Delivery coop | Vehicle ID | Delivery route | Per parcel |
+| Farm-to-home | Producer ID | Weekly run | Per basket |
+| School run | Parent group | School route | Free swap |
+
+**Steeradar is a protocol for community movement.** Fork it, run your own.
+
+---
+
+## 🗺️ Roadmap
+
+- [x] Vehicle gate & validation
+- [x] Live community map (OpenFreeMap)
+- [x] WebRTC lane chats (PeerJS)
+- [x] Geohash local mesh (serverless)
+- [x] Real Web Bluetooth scan
+- [x] Universal DB via Google Sheets
+- [x] Modular 11-file architecture
+- [x] OTP authentication (email)
+- [x] Image uploads (Google Drive)
+- [x] Live tracking (OSRM route lines)
+- [x] In-app diagnostics log viewer
+- [x] Edit / delete lanes and posts
+- [ ] UPI payment flow (scan QR → pay → confirm)
+- [ ] Post-trip ratings
+- [ ] Push notifications (FCM)
+- [ ] PWA install prompt
+- [ ] Offline mode (Service Worker)
+- [ ] Multi-language support
+- [ ] Self-hosted OSRM
+
+---
+
+## 🔐 Privacy & Security
+
+**What the server enforces (v6.1)**
+- **No shared secret** in the browser. Every private action carries a per-user session token (stored server-side only as a SHA-256 hash, 90-day expiry, revocable on logout).
+- **Ownership is decided by the server.** Lanes/posts can only be edited or deleted by the account that created them; the vehicle plate and display name on a lane come from your account, not the request.
+- **One plate = one account.** A registered plate cannot be claimed by another account.
+- **OTP hardening:** login codes go only to the *registered* email; codes are hashed, expire in 10 min, allow 5 guesses, are single-use, and are rate-limited per phone/email/day.
+- **Private chats:** 1:1 rooms (`dm-PLATE-PLATE`) are readable/writable only by those two plates; the sender name and plate are stamped server-side. Neighbourhood rooms need a signed-in account.
+- **No phone numbers or emails are ever sent to other users.** Strangers see lane/vehicle locations at ~110 m precision; you see your own exactly.
+- Inputs are validated and length-capped; ids are restricted to `[A-Za-z0-9_-]`; all sheet cells are plain text (no formula injection); the UI escapes everything it renders.
+- Photos are stored as **private** Drive files owned by the script owner; plate and UPI QR are never linked or shown to other users.
+
+**Honest limits**
+- It still talks to third parties: PeerJS cloud (WebRTC signalling), OpenFreeMap, OSRM demo server, Nominatim, unpkg. Peers can see each other's IP address during a WebRTC connection. "Ghost mode" hides you from the live map and lane markers.
+- Chat history lives in your Google Sheet and is readable by whoever owns that Sheet/Apps Script project (you). Disclose this to users; end-to-end encryption is not implemented.
+- Plate ownership is first-come-first-served, not verified against an RC database.
+- Consider your obligations under India's DPDP Act 2023 (notice, consent, deletion) before a public launch.
+
+---
+
+## 🤝 Contributing
+
+Steeradar is intentionally minimal. No build step, no framework, no lock-in.
+
+```bash
+git checkout -b feature/amazing-idea
+git commit -m "Add amazing idea"
+git push origin feature/amazing-idea
+```
+
+Open a PR. Bug reports with the in-app log (long-press logo → Copy) are gold.
+
+---
+
+## 👤 About the Maker
+
+<div align="center">
+
+<img src="https://avatars.githubusercontent.com/suryasticsai" alt="@suryasticsai" width="120" height="120" style="border-radius: 50%;" />
+
+### Sai Varakala ☀️
+
+**Techno Agilist · SAFe Scrum Master @ TCS**
+
+</div>
+
+I build open-source tools that solve small, real problems for real people — neighbourhood ride networks, offline-first AI assistants, and privacy-respecting utilities. Steeradar started as a weekend question: *"Can a whole ride-sharing app work without a backend?"* It grew into a modular, working peer-to-peer mesh running entirely on GitHub Pages.
+
+Everything I publish follows three rules:
+
+1. **Readable in one sitting**
+2. **Deployable by anyone with a GitHub account**
+3. **No analytics, no lock-in, no compromise**
+
+If Steeradar saves you a bus fare or teaches you one thing about WebRTC — mission accomplished.
+
+⭐ **Star the repo if it helped** — it genuinely means a lot.
+
+---
+
+## 📬 Connect
+
+<div align="center">
+
+| Platform | Handle |
+|---|---|
+| 💼 LinkedIn | [linkedin.com/in/suryasticsai](https://www.linkedin.com/in/suryasticsai) |
+| 📝 Medium | [suryasticsai.medium.com](https://suryasticsai.medium.com) |
+| 🐙 GitHub | [github.com/suryasticsai](https://github.com/suryasticsai) |
+| 🤗 Hugging Face | [huggingface.co/spaces/Suryasticsai](https://huggingface.co/spaces/Suryasticsai) |
+| 📷 Instagram | [instagram.com/saisuryastic](https://instagram.com/saisuryastic) |
+| ✉️ Email | [suryasticsai@gmail.com](mailto:suryasticsai@gmail.com) |
+
+**Everything at one handle → `@suryasticsai`**
+
+</div>
+
+---
+
+## 📜 License
+
+MIT © [Sai Varakala](https://github.com/suryasticsai)
+
+Free to fork, remix, ship. Attribution appreciated, not required.
+
+---
+
+## 🙏 Built on the shoulders of
+
+- [Leaflet](https://leafletjs.com/) — the friendliest map library on the web
+- [MapLibre GL](https://maplibre.org/) — the open vector map engine
+- [OpenFreeMap](https://openfreemap.org/) — free, keyless vector tiles
+- [OSRM](https://project-osrm.org/) — open-source routing machine
+- [PeerJS](https://peerjs.com/) — WebRTC made human
+- [OpenStreetMap](https://www.openstreetmap.org/) — the free world map
+- [Nominatim](https://nominatim.org/) — reverse geocoding for everyone
+- [Google Apps Script](https://developers.google.com/apps-script) — the serverless backend nobody pays for
+
+---
+
+<div align="center">
+
+### 🌟 If you made it this far — thank you.
+
+**Steeradar** is a bet that the web can be simpler, fairer, and more local.
+
+[⭐ Star on GitHub](https://github.com/suryasticsai/Steeradar) · [🚀 Try Live](https://suryasticsai.github.io/Steeradar/) · [💬 Say Hi](mailto:suryasticsai@gmail.com)
+
+<sub>Made with ☀️ by <a href="https://github.com/suryasticsai">@suryasticsai</a></sub>
+
+</div>
