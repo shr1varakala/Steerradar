@@ -19,7 +19,8 @@
             <div class="logo-text">
                 <i class="fas fa-satellite-dish"></i> SteerRadar
             </div>
-            <div class="flex align-center" style="gap: 15px;">
+            <div class="header-actions">
+                <!-- Admin Panel Button (Visible only to Admins) -->
                 <button id="admin-panel-btn" class="hidden btn btn-secondary btn-sm" onclick="openModal('admin-modal')">
                     <i class="fas fa-shield-alt"></i> Admin
                 </button>
@@ -32,9 +33,9 @@
         <main>
             <!-- 1. LANES VIEW (Live Drivers) -->
             <section id="view-lanes" class="view-section active">
-                <div class="flex justify-between align-center mb-20">
+                <div class="section-header flex justify-between align-center">
                     <div>
-                        <h2 class="view-title">Live Drivers</h2>
+                        <h2 class="section-title">Live Drivers</h2>
                         <p class="text-sub">Real-time community updates</p>
                     </div>
                     <button class="btn btn-secondary btn-sm">
@@ -80,7 +81,7 @@
                 <!-- Lane Card 2 -->
                 <div class="lane-card">
                     <div class="lane-header">
-                        <div class="seat-indicator" style="--percentage: 40%; --accent: var(--warning);">
+                        <div class="seat-indicator" style="--progress: 40%; --color: var(--warning);">
                             <div class="seat-inner">
                                 <span class="seat-count">3</span>
                                 <span class="seat-label">Seats</span>
@@ -92,7 +93,7 @@
                                 <i class="fas fa-bus"></i> Pine → River Rd → Bridge → Heights
                             </div>
                             <div class="lane-tags">
-                                <span class="tag tag-warning">● LIVE • DELAYED</span>
+                                <span class="tag tag-live tag-warning">● LIVE • DELAYED</span>
                                 <span class="tag tag-fare">$2.50</span>
                             </div>
                         </div>
@@ -115,7 +116,7 @@
 
             <!-- 2. HIVE VIEW (Community Feed) -->
             <section id="view-hive" class="view-section">
-                <div class="text-center mb-20">
+                <div class="hive-header">
                     <h2 class="hive-title">Hive</h2>
                     <p class="text-sub">Your community. All aboard.</p>
                 </div>
@@ -151,14 +152,14 @@
                     <div class="flex justify-between align-center">
                         <div>
                             <h3 class="greeting-title">Good evening, Vihaan 👋</h3>
-                            <p class="text-sub mt-5">Here's what's happening in your community.</p>
-                            <span class="tag tag-live mt-10">Greenwood Heights</span>
+                            <p class="text-sub mt-1">Here's what's happening in your community.</p>
+                            <span class="tag tag-live mt-2">Greenwood Heights</span>
                         </div>
                         <i class="fas fa-bus greeting-icon"></i>
                     </div>
                 </div>
 
-                <h3 class="section-title">Local posts</h3>
+                <h3 class="section-subtitle">Local posts</h3>
 
                 <!-- Post 1 -->
                 <div class="post-card">
@@ -183,25 +184,25 @@
             </section>
 
             <!-- 3. MAP VIEW -->
-            <section id="view-map" class="view-section view-map">
+            <section id="view-map" class="view-section p-0">
                 <div id="map-container">
                     <!-- Placeholder for Leaflet/Google Maps -->
                     <div class="map-placeholder">
                         <div class="radar-pulse"></div>
-                        <div class="map-placeholder-content">
+                        <div class="map-center-content">
                             <i class="fas fa-map-marked-alt map-icon"></i>
-                            <p class="text-sub mt-10">Map Integration Area</p>
-                            <p class="text-xs text-muted">(Leaflet/Google Maps goes here)</p>
+                            <p class="text-sub mt-2">Map Integration Area</p>
+                            <p class="text-xs text-darker">(Leaflet/Google Maps goes here)</p>
                         </div>
                         
                         <!-- Simulated Proximity Nodes -->
-                        <div class="proximity-node" style="top: 30%; left: 30%;">
-                            <img src="https://i.pravatar.cc/150?img=5" class="proximity-avatar">
-                            <p class="text-xs mt-5">12m • Looking</p>
+                        <div class="map-node" style="top: 30%; left: 30%;">
+                            <img src="https://i.pravatar.cc/150?img=5" class="node-avatar" style="border-color: var(--primary);">
+                            <p class="text-xs mt-1">12m • Looking</p>
                         </div>
-                        <div class="proximity-node" style="top: 20%; right: 20%;">
-                            <img src="https://i.pravatar.cc/150?img=12" class="proximity-avatar" style="border-color: var(--warning);">
-                            <p class="text-xs mt-5">19m • Driving</p>
+                        <div class="map-node" style="top: 20%; right: 20%;">
+                            <img src="https://i.pravatar.cc/150?img=12" class="node-avatar" style="border-color: var(--warning);">
+                            <p class="text-xs mt-1">19m • Driving</p>
                         </div>
                     </div>
 
@@ -222,13 +223,13 @@
                 <div class="profile-header">
                     <img src="https://i.pravatar.cc/150?img=11" class="profile-avatar">
                     <h2 id="profile-name-display" class="profile-name">Sai Kumar</h2>
-                    <p id="profile-role-display" class="text-sub">RearAgent</p>
+                    <p id="profile-role-display" class="profile-role">RearAgent</p>
                 </div>
 
                 <!-- SteerAgent Upgrade Section -->
                 <div id="become-steer-agent-section" class="post-card upgrade-card">
                     <h3 class="upgrade-title">Become a SteerAgent</h3>
-                    <p class="text-sub mb-15">Verify your documents to unlock driving features, post lanes, and accept payments.</p>
+                    <p class="text-sub mb-3">Verify your documents to unlock driving features, post lanes, and accept payments.</p>
                     <button class="btn btn-primary w-full" onclick="openModal('steer-agent-modal')">Apply Now</button>
                 </div>
 
@@ -240,7 +241,7 @@
 
                 <!-- Settings -->
                 <div class="post-card">
-                    <h3 class="section-title">Preferences</h3>
+                    <h3 class="section-subtitle">Preferences</h3>
                     <div class="setting-row">
                         <span>Ghost mode (hide from map)</span>
                         <input type="checkbox" id="toggle-ghost-mode" class="toggle-switch">
@@ -253,18 +254,18 @@
                         <span>Share UPI QR for payments</span>
                         <input type="checkbox" id="toggle-share-upi" class="toggle-switch" checked>
                     </div>
-                    <hr class="divider">
-                    <button class="btn btn-danger w-full" onclick="logout()">Log Out</button>
                 </div>
+
+                <button class="btn btn-secondary w-full mt-4" onclick="logout()">Log Out</button>
             </section>
         </main>
 
         <!-- BOTTOM NAVIGATION -->
         <nav id="bottom-nav">
-            <button onclick="switchTab('lanes')" class="active"><i class="fas fa-bus"></i> Lanes</button>
-            <button onclick="switchTab('map')"><i class="fas fa-map"></i> Map</button>
-            <button onclick="switchTab('hive')"><i class="fas fa-comments"></i> Hive</button>
-            <button onclick="switchTab('profile')"><i class="fas fa-user"></i> Profile</button>
+            <button onclick="switchTab('lanes')" class="active" id="nav-lanes"><i class="fas fa-bus"></i> Lanes</button>
+            <button onclick="switchTab('hive')" id="nav-hive"><i class="fas fa-comments"></i> Hive</button>
+            <button onclick="switchTab('map')" id="nav-map"><i class="fas fa-map"></i> Map</button>
+            <button onclick="switchTab('profile')" id="nav-profile"><i class="fas fa-user"></i> Profile</button>
         </nav>
 
         <!-- CHAT OVERLAY (Hive) -->
@@ -283,11 +284,11 @@
             
             <!-- Chat Input -->
             <div class="chat-input-area">
-                <button id="request-payment-btn" class="btn-primary btn-circle btn-payment" title="Request UPI Payment">
+                <button id="request-payment-btn" class="btn-primary btn-circle btn-sm" title="Request UPI Payment">
                     <i class="fas fa-rupee-sign"></i>
                 </button>
                 <input type="text" id="chat-input" placeholder="Type a message..." class="chat-input">
-                <button onclick="sendMessage()" class="btn-primary btn-circle"><i class="fas fa-paper-plane"></i></button>
+                <button onclick="sendMessage()" class="btn-primary btn-circle btn-sm"><i class="fas fa-paper-plane"></i></button>
             </div>
         </div>
     </div>
@@ -300,18 +301,18 @@
             <div class="auth-tabs">
                 <button id="tab-signin" class="auth-tab active" onclick="switchAuthTab('signin')">Sign In</button>
                 <button id="tab-signup" class="auth-tab" onclick="switchAuthTab('signup')">Create Account</button>
-                <button onclick="closeModal('auth-modal')" class="close-btn">&times;</button>
+                <button onclick="closeModal('auth-modal')" class="close-btn ml-auto">&times;</button>
             </div>
 
             <!-- Sign In Form -->
             <form id="signin-form">
                 <div class="form-group">
                     <label>Phone or Email</label>
-                    <input type="text" id="signin-identity" required placeholder="Enter phone or email" class="form-input">
+                    <input type="text" id="signin-identity" class="form-input" required placeholder="Enter phone or email">
                 </div>
                 <div class="form-group">
                     <label>Password</label>
-                    <input type="password" id="signin-password" required placeholder="Enter password" class="form-input">
+                    <input type="password" id="signin-password" class="form-input" required placeholder="Enter password">
                 </div>
                 <button type="submit" class="btn btn-primary w-full">Sign In</button>
             </form>
@@ -320,26 +321,26 @@
             <form id="signup-form" class="hidden">
                 <div class="form-group">
                     <label>Full Name</label>
-                    <input type="text" id="signup-name" required placeholder="Sai Kumar" class="form-input">
+                    <input type="text" id="signup-name" class="form-input" required placeholder="Sai Kumar">
                 </div>
                 <div class="form-group">
                     <label>Phone Number</label>
-                    <input type="tel" id="signup-phone" required placeholder="9876543210" class="form-input">
+                    <input type="tel" id="signup-phone" class="form-input" required placeholder="9876543210">
                 </div>
                 <div class="form-group">
                     <label>Email Address</label>
-                    <input type="email" id="signup-email" required placeholder="sai@example.com" class="form-input">
+                    <input type="email" id="signup-email" class="form-input" required placeholder="sai@example.com">
                 </div>
                 <div class="form-group">
                     <label>Password</label>
-                    <input type="password" id="signup-password" required placeholder="Create a strong password" class="form-input">
+                    <input type="password" id="signup-password" class="form-input" required placeholder="Create a strong password">
                 </div>
                 <div class="form-group">
                     <label>Confirm Password</label>
-                    <input type="password" id="signup-confirm-password" required placeholder="Re-enter password" class="form-input">
+                    <input type="password" id="signup-confirm-password" class="form-input" required placeholder="Re-enter password">
                 </div>
                 <button type="submit" class="btn btn-primary w-full">Create RearAgent Account</button>
-                <p class="text-center text-xs text-sub mt-10">By signing up, you agree to our Terms of Service.</p>
+                <p class="terms-text">By signing up, you agree to our Terms of Service.</p>
             </form>
         </div>
     </div>
@@ -354,11 +355,11 @@
             <form id="steer-agent-form">
                 <div class="form-group">
                     <label>Vehicle Number</label>
-                    <input type="text" id="sa-vehicle-number" required placeholder="KA01AB1234" class="form-input">
+                    <input type="text" id="sa-vehicle-number" class="form-input" required placeholder="KA01AB1234">
                 </div>
                 <div class="form-group">
                     <label>Vehicle Type</label>
-                    <select id="sa-vehicle-type" required class="form-input">
+                    <select id="sa-vehicle-type" class="form-input" required>
                         <option value="">Select...</option>
                         <option value="bike">Bike</option>
                         <option value="car">Car</option>
@@ -367,31 +368,31 @@
                 </div>
                 <div class="form-group">
                     <label>UPI ID (For Payments)</label>
-                    <input type="text" id="sa-upi-id" required placeholder="yourname@upi" class="form-input">
+                    <input type="text" id="sa-upi-id" class="form-input" required placeholder="yourname@upi">
                 </div>
                 <div class="form-group">
                     <label>Driver's License Photo</label>
-                    <input type="file" id="sa-license" accept="image/*" required class="form-input">
+                    <input type="file" id="sa-license" class="form-input" accept="image/*" required>
                 </div>
                 <div class="form-group">
                     <label>Vehicle RC Photo</label>
-                    <input type="file" id="sa-rc" accept="image/*" required class="form-input">
+                    <input type="file" id="sa-rc" class="form-input" accept="image/*" required>
                 </div>
                 <div class="form-group">
                     <label>Selfie with Vehicle</label>
-                    <input type="file" id="sa-selfie" accept="image/*" required class="form-input">
+                    <input type="file" id="sa-selfie" class="form-input" accept="image/*" required>
                 </div>
                 
                 <div class="agreement-box">
                     <strong>SteerAgent Agreement</strong>
                     <p>By checking this box, I confirm that all documents uploaded are authentic and belong to me. I agree to follow all traffic rules, maintain my vehicle responsibly, and treat all RearAgents with respect. I understand that any violation may lead to immediate termination of my SteerAgent account.</p>
                 </div>
-                <div class="flex align-center mt-10">
+                <div class="flex align-center mt-2">
                     <input type="checkbox" id="sa-agreement" required class="toggle-switch">
-                    <label for="sa-agreement" class="ml-10 text-sm">I agree to the SteerAgent Agreement.</label>
+                    <label for="sa-agreement" class="ml-2 text-sm">I agree to the SteerAgent Agreement.</label>
                 </div>
                 
-                <button type="submit" class="btn btn-primary w-full mt-20">Submit Application</button>
+                <button type="submit" class="btn btn-primary w-full mt-4">Submit Application</button>
             </form>
         </div>
     </div>
@@ -403,8 +404,8 @@
                 <h2 class="modal-title">Admin Panel</h2>
                 <button onclick="closeModal('admin-modal')" class="close-btn">&times;</button>
             </div>
-            <h3 class="section-title">Pending SteerAgent Applications</h3>
-            <div id="admin-application-list" class="mt-15">
+            <h3 class="section-subtitle">Pending SteerAgent Applications</h3>
+            <div id="admin-application-list" class="mt-2">
                 <!-- Applications will be injected here by JS -->
                 <p class="text-sub text-sm">No pending applications.</p>
             </div>
@@ -418,8 +419,8 @@
                 <h2 class="modal-title">Report Road Condition</h2>
                 <button onclick="closeModal('report-modal')" class="close-btn">&times;</button>
             </div>
-            <p class="text-sub text-sm mb-15">Drop a quick alert on the map for other drivers.</p>
-            <div class="report-grid">
+            <p class="text-sub mb-3">Drop a quick alert on the map for other drivers.</p>
+            <div class="grid-2-col">
                 <button class="btn btn-secondary" onclick="reportAlert('traffic')">🚧 Traffic</button>
                 <button class="btn btn-secondary" onclick="reportAlert('pothole')">🕳️ Pothole</button>
                 <button class="btn btn-secondary" onclick="reportAlert('police')">🚓 Police</button>
@@ -437,18 +438,21 @@
             </div>
             <div class="form-group">
                 <label>Location Name</label>
-                <input type="text" id="location-name" placeholder="e.g., Good Parking Spot" class="form-input">
+                <input type="text" id="location-name" class="form-input" placeholder="e.g., Good Parking Spot">
             </div>
             <button class="btn btn-primary w-full" onclick="confirmSaveLocation()">Save to My Profile</button>
         </div>
     </div>
 
     <!-- ================= SCRIPTS ================= -->
+    <!-- Config Script -->
     <script>
         window.STEERADAR = {
             SHEET_API_URL: 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE'
         };
     </script>
+    
+    <!-- Main App Logic (Module) -->
     <script type="module" src="js/app.js"></script>
 </body>
 </html>
