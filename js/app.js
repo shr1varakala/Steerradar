@@ -1,956 +1,692 @@
-// js/app.js - Boot + wiring
+/**
+ * ============================================================================
+ * STEERADAR FRONTEND CONTROLLER (v7.0)
+ * ============================================================================
+ * This file contains all the client-side logic for the SteerRadar app.
+ * It manages application state, handles DOM events, renders dynamic content,
+ * and communicates with the backend via the api.js module.
+ * 
+ * ARCHITECTURE:
+ * - State Management: Centralized `state` object.
+ * - Role-Based UI: Functions dynamically show/hide features based on user role.
+ * - Event Delegation: Event listeners are attached to parent containers where
+ *   possible to handle dynamically rendered content efficiently.
+ * ============================================================================
+ */
 
 import { api } from './api.js';
-import {
-  state, storage, session, showToast,
-  loadLanes, loadHive, saveLanes, saveHive,
-  setTimer, clearTimer,
-  getVehicleType, geohash, normalizeVehicle, validateVehicle,
-} from './store.js';
 
-import { initOnboarding } from './onboarding.js';
-import { initAuth, openAuthSheet, logout, validateSessionOnBoot } from './auth.js';
-import { lanes, initEditLane } from './lanes.js';
-import { chat, closeChat } from './chat.js';
-import { hive } from './hive.js';
-import { presence } from './presence.js';
-import { logger } from './logger.js';
-
-const CFG = window.STEERADAR || {};
-
-let _booted = false;
-
-// ============================================================
-//  GLOBAL ERROR HANDLERS
-// ============================================================
-window.addEventListener('error', (e) => {
-  console.error('[Steeradar]', e.message, e.filename, e.lineno);
-});
-window.addEventListener('unhandledrejection', (e) => {
-  console.error('[Steeradar] rejection:', e.reason);
-});
-
-// ============================================================
-//  MODAL CLOSE BUTTONS
-// ============================================================
-function initModalCloseButtons() {
-  // Every data-close button
-  document.querySelectorAll('[data-close]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const sel = btn.getAttribute('data-close');
-      const target = document.querySelector(sel);
-      if (target) target.classList.remove('active');
-      if (sel === '#chatModal') {
-        try { closeChat(); } catch (err) {}
-      }
-    });
-  });
-
-  // Click outside to close
-  document.querySelectorAll('.modal-overlay').forEach(overlay => {
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) overlay.classList.remove('active');
-    });
-  });
-
-  // Escape key
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
-    }
-  });
-
-  // Auth close (has its own id)
-  const authClose = document.getElementById('authClose');
-  if (authClose) {
-    authClose.addEventListener('click', () => {
-      document.getElementById('authModal')?.classList.remove('active');
-    });
-  }
-}
-
-// ============================================================
-//  BOOT
-// ============================================================
-function boot() {
-  const savedVehicle = storage.raw('vehicle', '');
-  if (!savedVehicle || !validateVehicle(savedVehicle)) {
-    console.log('[Steeradar] No vehicle found, gate is waiting');
-    return;
-  }
-  state.vehicle = savedVehicle;
-  unlockApp();
-}
-
-function unlockApp() {
-  if (_booted) return;
-  _booted = true;
-
-  try {
-    document.getElementById('onboardGate')?.classList.add('gate-hidden');
-
-    // Load local cache
-    try { lanes.loadFromStorage(); } catch (e) { console.warn(e); }
-    try { hive.loadFromStorage(); } catch (e) { console.warn(e); }
-
-    // Logger first so it captures everything
-    try { logger.init(); } catch (e) { console.warn(e); }
-    initModalCloseButtons();
-
-    // Init feature modules (each wrapped so one failure doesn't kill the app)
-    try { lanes.init(); } catch (e) { console.warn('lanes.init:', e); }
-    try { hive.init(); } catch (e) { console.warn('hive.init:', e); }
-    try { chat.init(); } catch (e) { console.warn('chat.init:', e); }
-    try { initAuth(); } catch (e) { console.warn('initAuth:', e); }
-    try { initEditLane(); } catch (e) { console.warn('initEditLane:', e); }
-
-    wireLogViewer();
-    wireDevMode();
-    wireTabs();
-    wireFab();
-    wireHeaderActions();
-    wireTrackingHud();
-    wireSettings();
-    wireFilterChips();
-
-    updateVehicleBadge();
-    updateAvatar();
-    loadTheme();
-
-    initMap();
-
-    // Delay geolocation so map container has real dimensions
-    setTimeout(() => {
-      if (state.map) {
-        try { state.map.invalidateSize(); } catch (e) {}
-        try { lanes.renderMarkers(); } catch (e) {}
-      }
-      startGeolocation();
-    }, 250);
-
-    startCloudPolling();
-    try { presence.start(); } catch (e) { console.warn('presence.start:', e); }
-
-    validateSessionOnBoot().then(ok => {
-      if (ok) updateAvatar();
-    }).catch(() => {});
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        clearTimer('cloudPoll');
-      } else {
-        startCloudPolling();
-        syncAll(true);
-        if (state.map) {
-          setTimeout(() => { try { state.map.invalidateSize(); } catch (e) {} }, 100);
-        }
-      }
-    });
-
-    console.log(
-      '%c Steeradar booted ',
-      'background:#0D9488;color:#fff;font-weight:800;padding:4px 10px;border-radius:4px',
-      '- vehicle:', state.vehicle,
-      '- user:', state.userName || 'anonymous'
-    );
-  } catch (err) {
-    console.error('[Steeradar] unlock failed:', err);
-    showToast('Boot error: ' + err.message, 'error');
-  }
-}
-
-// ============================================================
-//  HEADER
-// ============================================================
-function updateVehicleBadge() {
-  const el = document.getElementById('vehicleBadgeText');
-  if (el) el.textContent = state.vehicle || '-';
-}
-
-function updateAvatar() {
-  const el = document.getElementById('avatarBtn');
-  if (el) el.textContent = (state.userName || '?').charAt(0).toUpperCase();
-}
-
-function wireHeaderActions() {
-  document.getElementById('notifBtn')?.addEventListener('click', async () => {
-    if (!('Notification' in window)) { showToast('Notifications not supported', 'error'); return; }
-    if (Notification.permission === 'granted') { showToast('Notifications are on'); return; }
-    const p = await Notification.requestPermission();
-    showToast(
-      p === 'granted' ? 'Notifications enabled' : 'Notifications blocked',
-      p === 'granted' ? 'success' : 'error'
-    );
-  });
-
-  document.getElementById('avatarBtn')?.addEventListener('click', openSettings);
-  document.getElementById('vehicleBadge')?.addEventListener('click', openSettings);
-
-  document.getElementById('locationPill')?.addEventListener('click', () => {
-    if (!navigator.geolocation) { showToast('Location unavailable', 'error'); return; }
-    showToast('Updating location...');
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords;
-        state.userLat = latitude;
-        state.userLng = longitude;
-        if (state.map) state.map.setView([latitude, longitude], 14);
-        placeUserMarker(latitude, longitude);
-        reverseGeocode(latitude, longitude);
-        const newGh = geohash(latitude, longitude, 6);
-        if (newGh !== state.userGeohash) {
-          showToast('Entering new neighbourhood');
-          setTimeout(() => location.reload(), 800);
-        } else {
-          showToast('Location updated', 'success');
-        }
-      },
-      () => showToast('Enable location to update', 'error'),
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  });
-
-  document.getElementById('mapRefresh')?.addEventListener('click', function () {
-    this.classList.add('spinning');
-    refreshMapStyle();
-    if (state.map) { try { state.map.invalidateSize(); } catch (e) {} }
-    try { lanes.renderMarkers(); } catch (e) {}
-    lanes.hideCard();
-    setTimeout(() => this.classList.remove('spinning'), 900);
-    showToast('Map refreshed', 'success');
-  });
-
-  document.getElementById('btScanBtn')?.addEventListener('click', scanBluetooth);
-}
-
-// ============================================================
-//  MAP
-// ============================================================
-function getMapStyle() {
-  const pref = storage.raw('map-style', 'bright');
-  if (pref === 'dark') return CFG.MAP_STYLE_DARK || 'https://tiles.openfreemap.org/styles/dark';
-  return CFG.MAP_STYLE_BRIGHT || 'https://tiles.openfreemap.org/styles/bright';
-}
-
-function initMap() {
-  if (state.map) return;
-  const center = CFG.DEFAULT_CENTER || { lat: 12.9716, lng: 77.5946 };
-
-  state.map = L.map('map', {
-    zoomControl: false,
-    attributionControl: false,
-    center: [center.lat, center.lng],
-    zoom: CFG.DEFAULT_ZOOM || 13,
-  });
-
-  // Try MapLibre GL vector tiles, fall back to OSM raster
-  try {
-    state.mapLibreLayer = L.maplibreGL({
-      style: getMapStyle(),
-      interactive: false,
-    }).addTo(state.map);
-  } catch (e) {
-    console.warn('MapLibre failed, falling back to OSM tiles:', e);
-    try {
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(state.map);
-    } catch (e2) {
-      console.error('Fallback tiles also failed:', e2);
-    }
-  }
-
-  setTimeout(() => { try { state.map.invalidateSize(); } catch (e) {} }, 100);
-  try { lanes.renderMarkers(); } catch (e) {}
-}
-
-function refreshMapStyle() {
-  if (!state.map) return;
-
-  // Remove old layer
-  if (state.mapLibreLayer) {
-    try { state.map.removeLayer(state.mapLibreLayer); } catch (e) {}
-  }
-
-  // Add new layer with safety guards
-  try {
-    state.mapLibreLayer = L.maplibreGL({
-      style: getMapStyle(),
-      interactive: false,
-    }).addTo(state.map);
-
-    // NOTE: bringToBack() is NOT supported by maplibre-gl-leaflet; guard just in case
-    if (state.mapLibreLayer && typeof state.mapLibreLayer.bringToBack === 'function') {
-      state.mapLibreLayer.bringToBack();
-    }
-  } catch (e) {
-    console.warn('MapLibre refresh failed, falling back:', e);
-    try {
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(state.map);
-    } catch (e2) {}
-  }
-}
-
-function placeUserMarker(lat, lng) {
-  if (!state.map) return;
-  if (state.userMarker) {
-    try { state.map.removeLayer(state.userMarker); } catch (e) {}
-  }
-  state.userMarker = L.marker([lat, lng], {
-    icon: L.divIcon({
-      className: '',
-      html: '<div class="user-marker-wrap"></div>',
-      iconSize: [22, 22],
-      iconAnchor: [11, 11],
-    }),
-  }).addTo(state.map);
-}
-
-// ============================================================
-//  GEOLOCATION
-// ============================================================
-function startGeolocation() {
-  const fallback = () => {
-    setText('locText', 'Bengaluru, Karnataka');
-    reverseGeocode(12.9716, 77.5946);
-    if (state.map) {
-      state.map.setView([12.9716, 77.5946], 13);
-      setTimeout(() => { try { state.map.invalidateSize(); } catch (e) {} }, 100);
-    }
-    finishGeolocation(12.9716, 77.5946);
-  };
-
-  if (!navigator.geolocation) { fallback(); return; }
-
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const { latitude, longitude } = pos.coords;
-      state.userLat = latitude;
-      state.userLng = longitude;
-      if (state.map) {
-        state.map.setView([latitude, longitude], 14);
-        setTimeout(() => { try { state.map.invalidateSize(); } catch (e) {} }, 100);
-      }
-      placeUserMarker(latitude, longitude);
-      reverseGeocode(latitude, longitude);
-      finishGeolocation(latitude, longitude);
-    },
-    fallback,
-    { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
-  );
-}
-
-function finishGeolocation(lat, lng) {
-  try { presence.joinMesh(lat, lng); } catch (e) { console.warn('Mesh join:', e); }
-}
-
-function reverseGeocode(lat, lng) {
-  fetch(
-    'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng + '&zoom=14',
-    { headers: { 'Accept': 'application/json' } }
-  )
-    .then(r => r.json())
-    .then(data => {
-      if (data && data.address) {
-        const a = data.address;
-        const parts = [
-          a.suburb || a.neighbourhood || a.village,
-          a.city || a.town || a.state_district,
-        ].filter(Boolean);
-        setText('locText', parts.length ? parts.join(', ') : 'Your location');
-      }
-    })
-    .catch(() => setText('locText', 'Bengaluru, Karnataka'));
-}
-
-// ============================================================
-//  TABS
-// ============================================================
-function wireTabs() {
-  document.querySelectorAll('.nav-item').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.dataset.tab;
-      state.currentTab = tab;
-
-      document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b === btn));
-      document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === tab + 'View'));
-
-      updateFab();
-      try { lanes.hideCard(); } catch (e) {}
-
-      if (tab === 'pulse') {
-        setTimeout(() => {
-          if (state.map) { try { state.map.invalidateSize(); } catch (e) {} }
-        }, 150);
-      } else if (tab === 'lanes') {
-        try { lanes.render(); } catch (e) {}
-      } else if (tab === 'near') {
-        try { presence.renderNear(); } catch (e) {}
-      } else if (tab === 'hive') {
-        try { hive.render(); } catch (e) {}
-      }
-    });
-  });
-}
-
-function switchTab(tab) {
-  const btn = document.querySelector('.nav-item[data-tab="' + tab + '"]');
-  if (btn) btn.click();
-}
-
-function updateFab() {
-  const label = document.getElementById('fabLabel');
-  const sub = document.getElementById('fabSub');
-  if (!label || !sub) return;
-
-  if (state.currentTab === 'pulse' || state.currentTab === 'lanes') {
-    label.textContent = 'Post my lane';
-    sub.textContent = 'Share seats and route';
-  } else if (state.currentTab === 'near') {
-    label.textContent = 'Broadcast local';
-    sub.textContent = 'Message nearby drivers';
-  } else {
-    label.textContent = 'New post';
-    sub.textContent = 'Share with the community';
-  }
-}
-
-function wireFilterChips() {
-  document.querySelectorAll('.chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c === chip));
-      state.selectedFilter = chip.dataset.filter;
-      try { lanes.render(); } catch (e) {}
-      try { lanes.renderMarkers(); } catch (e) {}
-    });
-  });
-}
-
-// ============================================================
-//  FAB
-// ============================================================
-function wireFab() {
-  document.getElementById('fabBtn')?.addEventListener('click', async () => {
-    if (state.currentTab === 'pulse' || state.currentTab === 'lanes') {
-      try { lanes.openPost(); } catch (e) { showToast('Could not open post modal', 'error'); }
-    } else if (state.currentTab === 'near') {
-      const sent = presence.broadcast({
-        type: 'chat',
-        text: state.userName + ' is now visible nearby',
-        sender: state.userName,
-      });
-      showToast(
-        sent ? 'Broadcast to ' + sent + ' neighbour' + (sent === 1 ? '' : 's') : 'You are visible nearby',
-        'success'
-      );
-    } else {
-      try { hive.openCompose(); } catch (e) { showToast('Could not open compose', 'error'); }
-    }
-  });
-}
-
-// ============================================================
-//  TRACK HUD
-// ============================================================
-function wireTrackingHud() {
-  document.getElementById('trackClose')?.addEventListener('click', () => {
-    try { presence.stopTracking(); } catch (e) {}
-  });
-
-  document.getElementById('trackChat')?.addEventListener('click', () => {
-    const id = state.trackedLaneId;
-    if (!id) return;
-
-    let target = state.lanes.find(l => l.id === id);
-    if (!target && id.indexOf('peer-') === 0) {
-      const vehicle = id.replace('peer-', '');
-      target = state.cloudPeers && state.cloudPeers.get(vehicle);
-    }
-    if (!target) return;
-
-    // Prefer opening a personal DM if we have a vehicle id
-    if (target.vehicle && target.vehicle !== state.vehicle) {
-      chat.openPersonal(
-        target.vehicle,
-        target.name || target.driver,
-        target.avatar,
-        target.peerId
-      );
-    } else {
-      // Fallback: open as a lane chat
-      chat.openLane({
-        id: target.id,
-        driver: target.name || target.driver,
-        avatar: target.avatar,
-        peerId: target.peerId,
-        vehicle: target.vehicle,
-        mine: false,
-        route: { from: '', via: [], to: 'Direct chat' },
-        seats: { total: 0, taken: 0 },
-      });
-    }
-  });
-}
-
-// ============================================================
-//  THEME
-// ============================================================
-function loadTheme() {
-  applyTheme(storage.raw('theme', 'light'));
-}
-
-function applyTheme(mode) {
-  const resolved = mode === 'auto'
-    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-    : mode;
-  document.documentElement.setAttribute('data-theme', resolved);
-  storage.setRaw('theme', mode);
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', resolved === 'dark' ? '#0A0B0E' : '#FFFFFF');
-}
-
-// ============================================================
-//  SETTINGS
-// ============================================================
-function wireSettings() {
-  document.getElementById('settingsSave')?.addEventListener('click', saveSettings);
-
-  document.querySelectorAll('#setTheme button').forEach(b => {
-    b.addEventListener('click', () => {
-      document.querySelectorAll('#setTheme button').forEach(x => x.classList.toggle('active', x === b));
-      applyTheme(b.dataset.value);
-    });
-  });
-
-  document.querySelectorAll('#setMapStyle button').forEach(b => {
-    b.addEventListener('click', () => {
-      document.querySelectorAll('#setMapStyle button').forEach(x => x.classList.toggle('active', x === b));
-      storage.setRaw('map-style', b.dataset.value);
-      refreshMapStyle();
-    });
-  });
-
-  document.getElementById('cloudTest')?.addEventListener('click', async () => {
-    setCloudStatus('Testing...');
-    const ok = await api.ping();
-    if (ok) {
-      const dbg = await api.debug();
-      setCloudStatus(
-        'Connected - ' +
-          (dbg && dbg.lanes ? dbg.lanes : 0) + ' lanes, ' +
-          (dbg && dbg.hive ? dbg.hive : 0) + ' posts',
-        'ok'
-      );
-    } else {
-      setCloudStatus('Failed - ' + (api.lastError || 'unknown'), 'err');
-    }
-  });
-
-  document.getElementById('setClearLanes')?.addEventListener('click', async () => {
-    if (!confirm('Delete all your published lanes on this device?')) return;
-    const mine = state.lanes.filter(l => l.mine);
-    for (const l of mine) { try { await api.removeLane(l.id); } catch (e) {} }
-    state.lanes = state.lanes.filter(l => !l.mine);
-    saveLanes();
-    try { lanes.render(); lanes.renderMarkers(); } catch (e) {}
-    showToast('Your lanes cleared', 'success');
-  });
-
-  document.getElementById('setResetAll')?.addEventListener('click', () => {
-    if (!confirm('Reset everything? You will see onboarding again.')) return;
-    Object.keys(localStorage)
-      .filter(k => k.indexOf('steeradar-') === 0)
-      .forEach(k => localStorage.removeItem(k));
-    location.reload();
-  });
-
-  document.getElementById('authOpenBtn')?.addEventListener('click', () => {
-    document.getElementById('settingsModal')?.classList.remove('active');
-    openAuthSheet(session.isLoggedIn() ? 'login' : 'register');
-  });
-
-  document.getElementById('authLogoutBtn')?.addEventListener('click', async () => {
-    await logout();
-    updateAvatar();
-    showToast('Signed out');
-  });
-}
-
-function openSettings() {
-  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
-  set('setName', state.userName);
-  set('setVehicle', state.vehicle);
-
-  const theme = storage.raw('theme', 'light');
-  document.querySelectorAll('#setTheme button').forEach(b =>
-    b.classList.toggle('active', b.dataset.value === theme)
-  );
-
-  const mapStyle = storage.raw('map-style', 'bright');
-  document.querySelectorAll('#setMapStyle button').forEach(b =>
-    b.classList.toggle('active', b.dataset.value === mapStyle)
-  );
-
-  const toggle = (id, val) => { const el = document.getElementById(id); if (el) el.checked = val; };
-  toggle('setNotifChat',  storage.raw('notif-chat', 'true') !== 'false');
-  toggle('setNotifSeats', storage.raw('notif-seats', 'true') !== 'false');
-  toggle('setShareGps',   storage.raw('share-gps', 'true') !== 'false');
-  toggle('setVisible',    storage.raw('visible', 'true') !== 'false');
-  toggle('setGhost',      storage.raw('ghost', '') === 'true');
-  toggle('setShowPlate',  storage.raw('show-plate', 'true') !== 'false');
-  toggle('setShareUpi',   storage.raw('share-upi', 'true') !== 'false');
-  toggle('setCloudSync',  CFG.CLOUD_SYNC_DEFAULT === true || storage.raw('cloud-enabled', '') === 'true');
-
-  set('setCloudUrl', api.url);
-  set('setCloudKey', api.key);
-
-  if (api.url) {
-    setCloudStatus(
-      state.cloudOnline ? 'Cloud sync on' : ('Offline - ' + (state.cloudLastError || '')),
-      state.cloudOnline ? 'ok' : 'err'
-    );
-  } else {
-    setCloudStatus('Not configured', 'err');
-  }
-
-  document.getElementById('settingsModal')?.classList.add('active');
-}
-
-function saveSettings() {
-  const name = document.getElementById('setName')?.value.trim();
-  if (name) {
-    state.userName = name;
-    storage.setRaw('name', name);
-    updateAvatar();
-  }
-
-  const v = normalizeVehicle(document.getElementById('setVehicle')?.value || '');
-  if (v && validateVehicle(v) && v !== state.vehicle) {
-    storage.setRaw('vehicle', v);
-    setTimeout(() => location.reload(), 400);
-    return;
-  }
-
-  storage.setRaw('notif-chat', document.getElementById('setNotifChat')?.checked);
-  storage.setRaw('notif-seats', document.getElementById('setNotifSeats')?.checked);
-  storage.setRaw('share-gps', document.getElementById('setShareGps')?.checked);
-  storage.setRaw('visible', document.getElementById('setVisible')?.checked);
-  storage.setRaw('ghost', document.getElementById('setGhost')?.checked ? 'true' : '');
-  storage.setRaw('show-plate', document.getElementById('setShowPlate')?.checked);
-  storage.setRaw('share-upi', document.getElementById('setShareUpi')?.checked);
-
-  const cloudOn = document.getElementById('setCloudSync')?.checked;
-  storage.setRaw('cloud-enabled', cloudOn ? 'true' : 'false');
-
-  const devBlock = document.getElementById('devModeBlock');
-  if (devBlock && devBlock.style.display === 'block') {
-    const url = document.getElementById('setCloudUrl')?.value.trim();
-    const key = document.getElementById('setCloudKey')?.value.trim();
-    if (url && url !== CFG.SHEET_API_URL) storage.setRaw('cloud-url', url);
-    else storage.removeRaw('cloud-url');
-    if (key && key !== CFG.SHEET_WEBHOOK_SECRET) storage.setRaw('cloud-key', key);
-    else storage.removeRaw('cloud-key');
-    if (url) api.url = url;
-    if (key) api.key = key;
-  }
-
-  document.getElementById('settingsModal')?.classList.remove('active');
-  showToast('Settings saved', 'success');
-  startCloudPolling();
-}
-
-function setCloudStatus(text, variant) {
-  const el = document.getElementById('cloudStatus');
-  if (!el) return;
-  el.textContent = text;
-  el.className = 'cloud-status' + (variant ? ' ' + variant : '');
-}
-
-// ============================================================
-//  CLOUD POLLING
-// ============================================================
-async function syncAll(silent) {
-  try { await lanes.syncFromCloud(); } catch (e) {}
-  try { await hive.syncFromCloud(); } catch (e) {}
-}
-
-function startCloudPolling() {
-  clearTimer('cloudPoll');
-  const interval = CFG.CLOUD_POLL_INTERVAL_MS || 15000;
-  syncAll(true);
-  setTimer('cloudPoll', () => syncAll(true), interval);
-}
-
-// ============================================================
-//  BLUETOOTH
-// ============================================================
-async function scanBluetooth() {
-  if (!navigator.bluetooth) { showToast('Web Bluetooth not supported', 'error'); return; }
-  const btn = document.getElementById('btScanBtn');
-  if (!btn) return;
-  btn.disabled = true;
-  btn.textContent = 'Scanning...';
-  try {
-    const device = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true,
-      optionalServices: ['generic_access', 'device_information', 'battery_service'],
-    });
-    if (!state.btDevices.find(d => d.id === device.id)) {
-      state.btDevices.push({
-        id: device.id,
-        name: device.name || 'Unknown device',
-        connected: false,
-        rssi: -Math.floor(40 + Math.random() * 50),
-        device: device,
-      });
-    }
-    renderBluetooth();
-    showToast('Found: ' + (device.name || 'Unknown'));
-    try {
-      await device.gatt.connect();
-      const entry = state.btDevices.find(d => d.id === device.id);
-      if (entry) entry.connected = true;
-      renderBluetooth();
-    } catch (e) {}
-  } catch (err) {
-    if (err.name !== 'NotFoundError') showToast('Bluetooth scan failed', 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Scan';
-  }
-}
-
-function renderBluetooth() {
-  const wrap = document.getElementById('btDevices');
-  if (!wrap) return;
-  if (!state.btDevices.length) {
-    wrap.innerHTML = '<div class="bt-empty">Tap Scan to discover nearby Bluetooth devices</div>';
-    return;
-  }
-  wrap.innerHTML = state.btDevices.map(d => (
-    '<div class="bt-device" data-id="' + d.id + '">' +
-      '<div class="bt-icon">' + (d.connected ? '🔗' : '📶') + '</div>' +
-      '<div class="bt-info">' +
-        '<div class="bt-name">' + escapeHtml(d.name) + '</div>' +
-        '<div class="bt-meta">' + (d.connected ? 'Connected' : 'RSSI ' + d.rssi + ' dBm') + '</div>' +
-      '</div>' +
-      '<button class="bt-action" data-action="toggle">' + (d.connected ? 'Drop' : 'Connect') + '</button>' +
-    '</div>'
-  )).join('');
-
-  wrap.querySelectorAll('[data-action="toggle"]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const dev = state.btDevices.find(d => d.id === btn.closest('.bt-device').dataset.id);
-      if (!dev || !dev.device) return;
-      try {
-        if (dev.connected) { dev.device.gatt.disconnect(); dev.connected = false; }
-        else { await dev.device.gatt.connect(); dev.connected = true; }
-        renderBluetooth();
-      } catch (e) {
-        showToast('Bluetooth action failed', 'error');
-      }
-    });
-  });
-}
-
-// ============================================================
-//  PEERJS
-// ============================================================
-function initPeer() {
-  if (typeof Peer === 'undefined') { console.warn('PeerJS not loaded'); return; }
-  const id = 'steeradar-veh-' + state.vehicle;
-  state.peerId = id;
-  try {
-    state.peer = new Peer(id, { debug: 0 });
-  } catch (e) {
-    console.warn('Peer init failed:', e);
-    return;
-  }
-
-  state.peer.on('open', () => {
-    setConnBadge(true, 'Online');
-    try { presence.start(); } catch (e) {}
-  });
-
-  state.peer.on('connection', (conn) => {
-    conn.on('open', () => {
-      state.connections.set(conn.peer, conn);
-      attachPeerHandlers(conn);
-    });
-  });
-
-  state.peer.on('error', (err) => {
-    if (err.type === 'unavailable-id') {
-      try { state.peer.destroy(); } catch (e) {}
-      const newId = id + '-' + Math.random().toString(36).slice(2, 6);
-      state.peerId = newId;
-      try { state.peer = new Peer(newId, { debug: 0 }); }
-      catch (e) { return; }
-      state.peer.on('open', () => setConnBadge(true, 'Online'));
-      state.peer.on('connection', (c) => {
-        c.on('open', () => {
-          state.connections.set(c.peer, c);
-          attachPeerHandlers(c);
-        });
-      });
-    } else if (err.type !== 'peer-unavailable') {
-      setConnBadge(false, 'Connection issue');
-    }
-  });
-
-  state.peer.on('disconnected', () => {
-    setConnBadge(false, 'Reconnecting...');
-    setTimeout(() => { try { state.peer.reconnect(); } catch (e) {} }, 2000);
-  });
-}
-
-function attachPeerHandlers(conn) {
-  conn.on('data', (data) => {
-    if (!data || typeof data !== 'object') return;
-
-    if (data.type === 'chat') {
-      // Route to chat.receive() with the room id from the payload
-      try { chat.receive(data.text, data.sender, data.roomId); } catch (e) {}
-    } else if (data.type === 'hive-post') {
-      if (!state.hivePosts.find(p => p.id === data.post.id)) {
-        state.hivePosts.push(data.post);
-        saveHive();
-        try { hive.render(); } catch (e) {}
-      }
-    }
-  });
-  conn.on('close', () => state.connections.delete(conn.peer));
-}
-
-function setConnBadge(online, text) {
-  const el = document.getElementById('connBadge');
-  if (!el) return;
-  el.classList.toggle('online', !!online);
-  el.classList.toggle('offline', !online);
-  el.innerHTML = '<span class="dot"></span> ' + escapeHtml(text);
-}
-
-// ============================================================
-//  LOG VIEWER
-// ============================================================
-function wireLogViewer() {
-  document.getElementById('logCopy')?.addEventListener('click', () => logger.export());
-  document.getElementById('logClear')?.addEventListener('click', () => logger.clear());
-  document.getElementById('logRefresh')?.addEventListener('click', () => logger.render());
-
-  const logo = document.getElementById('logoTrigger');
-  if (logo) {
-    let holdTimer = null;
-    const start = (e) => {
-      e.preventDefault();
-      holdTimer = setTimeout(() => {
-        holdTimer = null;
-        logger.render();
-        document.getElementById('logModal')?.classList.add('active');
-      }, 600);
-    };
-    const cancel = () => {
-      if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
-    };
-    logo.addEventListener('touchstart', start, { passive: false });
-    logo.addEventListener('touchend', cancel);
-    logo.addEventListener('touchcancel', cancel);
-    logo.addEventListener('mousedown', start);
-    logo.addEventListener('mouseup', cancel);
-    logo.addEventListener('mouseleave', cancel);
-  }
-}
-
-// ============================================================
-//  DEV MODE
-// ============================================================
-let _devTaps = 0;
-let _devTimer = null;
-
-function wireDevMode() {
-  const tapTarget = document.getElementById('versionTap');
-  if (!tapTarget) return;
-
-  tapTarget.addEventListener('click', () => {
-    _devTaps++;
-    if (_devTimer) clearTimeout(_devTimer);
-    _devTimer = setTimeout(() => { _devTaps = 0; }, 2500);
-
-    if (_devTaps >= 5) {
-      _devTaps = 0;
-      const block = document.getElementById('devModeBlock');
-      const hint = document.getElementById('devModeHint');
-      if (block) {
-        const shown = block.style.display === 'block';
-        block.style.display = shown ? 'none' : 'block';
-        if (hint) hint.textContent = shown ? 'tap 5 times for diagnostics' : 'dev mode on';
-      }
-    }
-  });
-
-  document.getElementById('cloudSaveDev')?.addEventListener('click', () => {
-    const url = document.getElementById('setCloudUrl')?.value.trim();
-    const key = document.getElementById('setCloudKey')?.value.trim();
-    if (!url || !key) { showToast('Both fields required', 'error'); return; }
-    storage.setRaw('cloud-url', url);
-    storage.setRaw('cloud-key', key);
-    api.url = url;
-    api.key = key;
-    showToast('Endpoint saved - reloading', 'success');
-    setTimeout(() => location.reload(), 600);
-  });
-}
-
-// ============================================================
-//  UTILS
-// ============================================================
-function setText(id, value) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = value;
-}
-
-function escapeHtml(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[c]));
-}
-
-// ============================================================
-//  BOOTSTRAP
-// ============================================================
-function main() {
-  // Listen for the inline boot unlock event
-  window.addEventListener('steeradar:unlock', () => {
-    console.log('[Steeradar] Unlock event received');
-    boot();
-    if (state.vehicle) initPeer();
-  });
-
-  // Also try booting immediately (in case inline already unlocked)
-  const saved = storage.raw('vehicle', '');
-  if (saved && validateVehicle(saved)) {
-    setTimeout(() => {
-      boot();
-      if (state.vehicle) initPeer();
-    }, 100);
-  }
-}
-
-if (document.readyState === 'complete' || document.readyState === 'interactive') {
-  setTimeout(main, 0);
-} else {
-  document.addEventListener('DOMContentLoaded', main);
-}
-
-window.SteeradarApp = {
-  boot: boot,
-  unlockApp: unlockApp,
-  syncAll: syncAll,
-  openSettings: openSettings,
-  switchTab: switchTab,
-  getState: () => state,
+// ============================================================================
+// 1. GLOBAL STATE & CONSTANTS
+// ============================================================================
+const state = {
+    user: null,              // Logged-in user object
+    activeTab: 'lanes',      // Current active view
+    lanes: [],               // Cached lanes data
+    hive: [],                // Cached hive feed data
+    messages: {},            // Cached chat messages by roomId
+    currentRoom: null,       // Active chat room ID
+    pendingLocation: null,   // Location selected on map waiting to be saved
+    map: null,               // Placeholder for Leaflet/Google Maps instance
+    isOnline: true           // Network status
 };
+
+const DOM = {
+    // Views
+    views: document.querySelectorAll('.view-section'),
+    navButtons: document.querySelectorAll('#bottom-nav button'),
+    
+    // Modals
+    modals: document.querySelectorAll('.modal-overlay'),
+    
+    // Profile Elements
+    profileName: document.getElementById('profile-name-display'),
+    profileRole: document.getElementById('profile-role-display'),
+    headerAvatar: document.getElementById('header-avatar'),
+    adminBtn: document.getElementById('admin-panel-btn'),
+    
+    // SteerAgent Elements
+    steerAgentControls: document.getElementById('steer-agent-controls'),
+    becomeAgentSection: document.getElementById('become-steer-agent-section'),
+    pendingAgentSection: document.getElementById('steer-agent-pending-section'),
+    
+    // Chat Elements
+    chatView: document.getElementById('hive-chat-view'),
+    chatMessages: document.getElementById('chat-messages-container'),
+    chatInput: document.getElementById('chat-input'),
+    chatTitle: document.getElementById('chat-room-title'),
+    
+    // Containers
+    lanesContainer: document.querySelector('#view-lanes .lane-card')?.parentElement,
+    hiveContainer: document.querySelector('#view-hive .post-card:last-of-type')?.parentElement,
+    adminApplicationList: document.getElementById('admin-application-list')
+};
+
+// ============================================================================
+// 2. INITIALIZATION
+// ============================================================================
+
+document.addEventListener('DOMContentLoaded', async () => {
+    console.log('[App] Initializing SteerRadar...');
+    setupEventListeners();
+    initMapPlaceholder();
+    await checkSession();
+});
+
+async function checkSession() {
+    const session = await api.checkSession();
+    if (session && session.valid) {
+        state.user = session.user;
+        api.setSession({ phone: state.user.phone, token: api.token, user: state.user });
+        updateUIForRole();
+    } else {
+        openModal('auth-modal');
+    }
+}
+
+// ============================================================================
+// 3. EVENT LISTENERS
+// ============================================================================
+
+function setupEventListeners() {
+    // 3.1 Auth Forms
+    document.getElementById('signin-form')?.addEventListener('submit', handleSignIn);
+    document.getElementById('signup-form')?.addEventListener('submit', handleSignUp);
+    
+    // 3.2 SteerAgent Application Form
+    document.getElementById('steer-agent-form')?.addEventListener('submit', handleSteerAgentApplication);
+    
+    // 3.3 Settings Toggles
+    document.getElementById('toggle-ghost-mode')?.addEventListener('change', handleGhostModeToggle);
+    
+    // 3.4 Chat Input (Enter key)
+    DOM.chatInput?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendMessage();
+    });
+
+    // 3.5 Network Status
+    window.addEventListener('online', () => { state.isOnline = true; showToast('Back online', 'success'); });
+    window.addEventListener('offline', () => { state.isOnline = false; showToast('You are offline', 'error'); });
+}
+
+// ============================================================================
+// 4. AUTHENTICATION & SESSION
+// ============================================================================
+
+async function handleSignIn(e) {
+    e.preventDefault();
+    const identity = document.getElementById('signin-identity').value.trim();
+    const password = document.getElementById('signin-password').value;
+    const btn = e.target.querySelector('button[type="submit"]');
+    
+    btn.textContent = 'Signing in...';
+    const res = await api.login({ phone: identity, password }); // Assuming phone for now, adjust if email supported
+    btn.textContent = 'Sign In';
+    
+    if (res && res.token) {
+        api.setSession(res);
+        state.user = res.user;
+        closeModal('auth-modal');
+        updateUIForRole();
+        showToast(`Welcome back, ${state.user.name}!`, 'success');
+    } else {
+        showToast(api.lastError || 'Login failed', 'error');
+    }
+}
+
+async function handleSignUp(e) {
+    e.preventDefault();
+    const name = document.getElementById('signup-name').value.trim();
+    const phone = document.getElementById('signup-phone').value.trim();
+    const email = document.getElementById('signup-email').value.trim();
+    const password = document.getElementById('signup-password').value;
+    const confirm = document.getElementById('signup-confirm-password').value;
+
+    if (password !== confirm) return showToast('Passwords do not match', 'error');
+
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.textContent = 'Creating account...';
+    
+    // NOTE: In a real flow, you would call api.sendOtp() here first, then show an OTP input field,
+    // then call api.verifyOtp(), and finally api.register(). For this implementation, 
+    // we assume OTP verification is either bypassed or handled in a previous step.
+    const res = await api.register({ name, phone, email, password });
+    btn.textContent = 'Create Account';
+
+    if (res && res.token) {
+        api.setSession(res);
+        state.user = res.user;
+        closeModal('auth-modal');
+        updateUIForRole();
+        showToast('Account created successfully!', 'success');
+    } else {
+        showToast(api.lastError || 'Registration failed', 'error');
+    }
+}
+
+async function handleLogout() {
+    await api.logout();
+    api.clearSession();
+    state.user = null;
+    window.location.reload(); // Simplest way to reset state
+}
+
+// ============================================================================
+// 5. ROLE-BASED UI UPDATES
+// ============================================================================
+
+function updateUIForRole() {
+    if (!state.user) return;
+
+    // 5.1 Update Profile Header & Display
+    DOM.profileName.textContent = state.user.name;
+    DOM.profileRole.textContent = state.user.role === 'agent' ? 'SteerAgent' : 'RearAgent';
+    
+    const defaultAvatar = 'https://i.pravatar.cc/150?img=11';
+    const avatarUrl = state.user.photo || defaultAvatar;
+    DOM.headerAvatar.src = avatarUrl;
+    document.querySelector('.profile-avatar')?.setAttribute('src', avatarUrl);
+
+    // 5.2 Admin Panel
+    if (state.user.isAdmin) {
+        DOM.adminBtn.classList.remove('hidden');
+    } else {
+        DOM.adminBtn.classList.add('hidden');
+    }
+
+    // 5.3 SteerAgent vs RearAgent UI
+    if (state.user.role === 'agent') {
+        DOM.steerAgentControls.classList.remove('hidden');
+        DOM.becomeAgentSection.classList.add('hidden');
+        DOM.pendingAgentSection.classList.add('hidden');
+    } else {
+        DOM.steerAgentControls.classList.add('hidden');
+        
+        // Check application status
+        if (state.user.agentStatus === 'pending') {
+            DOM.becomeAgentSection.classList.add('hidden');
+            DOM.pendingAgentSection.classList.remove('hidden');
+        } else {
+            DOM.becomeAgentSection.classList.remove('hidden');
+            DOM.pendingAgentSection.classList.add('hidden');
+        }
+    }
+
+    // 5.4 Load Initial Data
+    loadLanes();
+    loadHive();
+}
+
+// ============================================================================
+// 6. NAVIGATION & MODALS
+// ============================================================================
+
+window.switchTab = (tabName) => {
+    state.activeTab = tabName;
+    
+    // Update Nav Buttons
+    DOM.navButtons.forEach(btn => btn.classList.remove('active'));
+    document.getElementById(`nav-${tabName}`)?.classList.add('active');
+
+    // Update Views
+    DOM.views.forEach(view => view.classList.remove('active'));
+    document.getElementById(`view-${tabName}`)?.classList.add('active');
+
+    // Contextual Loading
+    if (tabName === 'hive') loadHive();
+    if (tabName === 'lanes') loadLanes();
+    if (tabName === 'map') setTimeout(() => { if (state.map) state.map.invalidateSize(); }, 100);
+};
+
+window.openModal = (id) => document.getElementById(id)?.classList.remove('hidden');
+window.closeModal = (id) => document.getElementById(id)?.classList.add('hidden');
+
+window.switchAuthTab = (tab) => {
+    document.getElementById('tab-signin').classList.toggle('active', tab === 'signin');
+    document.getElementById('tab-signup').classList.toggle('active', tab === 'signup');
+    document.getElementById('signin-form').classList.toggle('hidden', tab !== 'signin');
+    document.getElementById('signup-form').classList.toggle('hidden', tab !== 'signup');
+};
+
+// ============================================================================
+// 7. LANES (Live Drivers)
+// ============================================================================
+
+async function loadLanes() {
+    if (!DOM.lanesContainer) return;
+    DOM.lanesContainer.innerHTML = '<div class="text-center text-sub mt-4">Loading lanes...</div>';
+    
+    const lanes = await api.listLanes();
+    state.lanes = lanes;
+    
+    if (lanes.length === 0) {
+        DOM.lanesContainer.innerHTML = '<div class="text-center text-sub mt-4">No active lanes right now.</div>';
+        return;
+    }
+
+    DOM.lanesContainer.innerHTML = lanes.map(lane => createLaneCardHTML(lane)).join('');
+}
+
+function createLaneCardHTML(lane) {
+    // Determine seat color
+    const seatColor = lane.seats > 5 ? 'var(--primary)' : (lane.seats > 2 ? 'var(--warning)' : 'var(--danger)');
+    const statusTag = lane.status === 'active' 
+        ? '<span class="tag tag-live">● LIVE</span>' 
+        : `<span class="tag tag-warning">● ${lane.status.toUpperCase()}</span>`;
+
+    return `
+        <div class="lane-card">
+            <div class="lane-header">
+                <div class="seat-indicator" style="--progress: ${(lane.seats/10)*100}%; --color: ${seatColor};">
+                    <div class="seat-inner">
+                        <span class="seat-count">${lane.seats || 0}</span>
+                        <span class="seat-label">Seats</span>
+                    </div>
+                </div>
+                <div class="lane-details">
+                    <div class="lane-title">${escapeHTML(lane.title || 'Untitled Route')}</div>
+                    <div class="lane-route">
+                        <i class="fas fa-route"></i> ${escapeHTML(lane.description || 'No description')}
+                    </div>
+                    <div class="lane-tags">
+                        ${statusTag}
+                        <span class="tag tag-fare">${lane.vehicleType || 'Any'}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="lane-footer">
+                <div class="driver-info">
+                    <img src="${lane.photo || 'https://i.pravatar.cc/150?img=12'}" class="driver-avatar" style="border-radius:50%; object-fit:cover;">
+                    <div>
+                        <div class="driver-name">${escapeHTML(lane.ownerName || 'Unknown')}</div>
+                        <div class="driver-rating"><i class="fas fa-star"></i> Driver</div>
+                    </div>
+                </div>
+                <div class="lane-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="openChat('${lane.id}', '${escapeHTML(lane.ownerName)}')">
+                        <i class="fas fa-comment"></i> Chat
+                    </button>
+                    <button class="btn btn-primary btn-sm">
+                        <i class="fas fa-chair"></i> Request
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// ============================================================================
+// 8. HIVE (Community Feed)
+// ============================================================================
+
+async function loadHive() {
+    if (!DOM.hiveContainer) return;
+    // Clear existing posts but keep the header/stories
+    const existingPosts = DOM.hiveContainer.querySelectorAll('.post-card:not(.greeting-card)');
+    existingPosts.forEach(p => p.remove());
+
+    const posts = await api.listHive();
+    state.hive = posts;
+
+    if (posts.length === 0) {
+        DOM.hiveContainer.insertAdjacentHTML('beforeend', '<div class="text-center text-sub mt-4">No posts yet. Be the first to share!</div>');
+        return;
+    }
+
+    posts.forEach(post => {
+        DOM.hiveContainer.insertAdjacentHTML('beforeend', createHivePostHTML(post));
+    });
+}
+
+function createHivePostHTML(post) {
+    let mediaHTML = '';
+    
+    // Render Media based on type
+    if (post.photo) {
+        mediaHTML = `<div class="post-image"><img src="${post.photo}" alt="Post image"></div>`;
+    } else if (post.mediaType === 'youtube' && post.mediaUrl) {
+        const videoId = post.mediaUrl.split('v=')[1]?.split('&')[0] || post.mediaUrl.split('youtu.be/')[1];
+        mediaHTML = `<div style="margin-top:10px; border-radius:12px; overflow:hidden;">
+            <iframe width="100%" height="200" src="https://www.youtube.com/embed/${videoId}" frameborder="0" allowfullscreen></iframe>
+        </div>`;
+    } else if (post.mediaType === 'instagram' && post.mediaUrl) {
+        mediaHTML = `<div style="margin-top:10px;"><blockquote class="instagram-media" data-instgrm-permalink="${post.mediaUrl}" data-instgrm-version="14" style="width:100%;"></blockquote></div>`;
+        // Note: Instagram embeds require their script to process dynamically added elements
+        if (window.instgrm) setTimeout(() => window.instgrm.Embeds.process(), 100);
+    }
+
+    return `
+        <div class="post-card">
+            <div class="post-header">
+                <img src="https://i.pravatar.cc/150?img=${Math.floor(Math.random() * 50)}" class="driver-avatar avatar-lg" style="border-radius:50%;">
+                <div>
+                    <div class="post-user">${escapeHTML(post.ownerName)} <i class="fas fa-check-circle verified-badge"></i></div>
+                    <div class="post-time">${timeAgo(post.createdAt)}</div>
+                </div>
+            </div>
+            <div class="post-content">${escapeHTML(post.text)}</div>
+            ${mediaHTML}
+            <div class="post-actions">
+                <div class="post-action" onclick="toggleLike('${post.id}', ${post.likes})">
+                    <i class="far fa-heart"></i> <span id="likes-${post.id}">${post.likes || 0}</span>
+                </div>
+                <div class="post-action"><i class="far fa-comment"></i> Comment</div>
+                <div class="post-action"><i class="fas fa-share"></i> Share</div>
+            </div>
+        </div>
+    `;
+}
+
+window.toggleLike = async (postId, currentLikes) => {
+    if (!state.user) return showToast('Sign in to like posts', 'error');
+    
+    const isLiked = document.getElementById(`likes-${postId}`).textContent > currentLikes;
+    const delta = isLiked ? -1 : 1;
+    
+    // Optimistic UI update
+    document.getElementById(`likes-${postId}`).textContent = currentLikes + delta;
+    
+    await api.like('hive', postId, delta);
+};
+
+// ============================================================================
+// 9. CHAT SYSTEM
+// ============================================================================
+
+window.openChat = (roomId, name) => {
+    state.currentRoom = roomId;
+    DOM.chatTitle.textContent = `Chat with ${name}`;
+    DOM.chatView.classList.remove('hidden');
+    loadMessages(roomId);
+};
+
+window.closeChat = () => {
+    state.currentRoom = null;
+    DOM.chatView.classList.add('hidden');
+};
+
+async function loadMessages(roomId) {
+    DOM.chatMessages.innerHTML = '<div class="text-center text-sub text-sm">Loading messages...</div>';
+    
+    const messages = await api.getMessages(roomId);
+    state.messages[roomId] = messages;
+    
+    if (messages.length === 0) {
+        DOM.chatMessages.innerHTML = '<div class="text-center text-sub text-sm">No messages yet. Say hi!</div>';
+        return;
+    }
+
+    DOM.chatMessages.innerHTML = messages.map(msg => `
+        <div class="chat-message ${msg.mine ? 'sent' : 'received'}">
+            ${escapeHTML(msg.text)}
+        </div>
+    `).join('');
+    
+    scrollToBottom();
+}
+
+window.sendMessage = async () => {
+    const text = DOM.chatInput.value.trim();
+    if (!text || !state.currentRoom) return;
+
+    // Optimistic UI update
+    DOM.chatMessages.insertAdjacentHTML('beforeend', `
+        <div class="chat-message sent">${escapeHTML(text)}</div>
+    `);
+    DOM.chatInput.value = '';
+    scrollToBottom();
+
+    // Send to backend
+    const res = await api.sendMessage({ roomId: state.currentRoom, text });
+    if (!res) {
+        showToast('Failed to send message', 'error');
+        // Optionally remove the optimistic message here if failed
+    }
+};
+
+function scrollToBottom() {
+    DOM.chatMessages.scrollTop = DOM.chatMessages.scrollHeight;
+}
+
+// ============================================================================
+// 10. STEERAGENT APPLICATION
+// ============================================================================
+
+async function handleSteerAgentApplication(e) {
+    e.preventDefault();
+    
+    const vehicleNumber = document.getElementById('sa-vehicle-number').value.trim();
+    const vehicleType = document.getElementById('sa-vehicle-type').value;
+    const upiId = document.getElementById('sa-upi-id').value.trim();
+    const agreement = document.getElementById('sa-agreement').checked;
+    
+    const licenseFile = document.getElementById('sa-license').files[0];
+    const rcFile = document.getElementById('sa-rc').files[0];
+    const selfieFile = document.getElementById('sa-selfie').files[0];
+
+    if (!licenseFile || !rcFile || !selfieFile) {
+        return showToast('Please upload all required documents.', 'error');
+    }
+
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.textContent = 'Uploading documents...';
+    btn.disabled = true;
+
+    try {
+        // 1. Convert files to Base64
+        const licenseBase64 = await fileToBase64(licenseFile);
+        const rcBase64 = await fileToBase64(rcFile);
+        const selfieBase64 = await fileToBase64(selfieFile);
+
+        // 2. Upload images to Drive via API
+        const licenseRes = await api.uploadImage(licenseBase64, 'vehicles');
+        const rcRes = await api.uploadImage(rcBase64, 'vehicles');
+        const selfieRes = await api.uploadImage(selfieBase64, 'avatars');
+
+        if (!licenseRes || !rcRes || !selfieRes) {
+            throw new Error('Image upload failed. Please try again.');
+        }
+
+        // 3. Submit application
+        btn.textContent = 'Submitting application...';
+        const payload = {
+            vehicle: vehicleNumber,
+            vehicleType: vehicleType,
+            vehiclePhoto: rcRes.url, // Using RC as vehicle photo
+            photo: selfieRes.url,
+            city: 'Default' // Can add a city input to the form
+        };
+
+        const res = await api.becomeAgent(payload);
+        
+        if (res) {
+            showToast('Application submitted! Pending admin approval.', 'success');
+            closeModal('steer-agent-modal');
+            // Update local state to reflect pending status
+            state.user.agentStatus = 'pending';
+            updateUIForRole();
+        } else {
+            throw new Error(api.lastError || 'Submission failed');
+        }
+
+    } catch (err) {
+        console.error(err);
+        showToast(err.message, 'error');
+    } finally {
+        btn.textContent = 'Submit Application';
+        btn.disabled = false;
+    }
+}
+
+// ============================================================================
+// 11. MAP & LOCATIONS
+// ============================================================================
+
+function initMapPlaceholder() {
+    // In production, replace this with Leaflet/Google Maps initialization
+    const mapContainer = document.querySelector('.map-placeholder');
+    if (!mapContainer) return;
+
+    mapContainer.addEventListener('click', (e) => {
+        if (!state.user) return showToast('Sign in to save locations', 'error');
+        
+        // Simulate getting lat/lng from a click
+        // In Leaflet, this would be e.latlng.lat and e.latlng.lng
+        state.pendingLocation = {
+            lat: 12.9716 + (Math.random() - 0.5) * 0.01,
+            lng: 77.5946 + (Math.random() - 0.5) * 0.01
+        };
+        
+        openModal('location-modal');
+    });
+}
+
+window.confirmSaveLocation = async () => {
+    const name = document.getElementById('location-name').value.trim();
+    if (!name || !state.pendingLocation) return showToast('Please enter a name', 'error');
+    
+    const res = await api.savePoint({ 
+        ...state.pendingLocation, 
+        label: name,
+        shared: true // Default to shared
+    });
+
+    if (res) {
+        showToast(`Location "${name}" saved!`, 'success');
+        closeModal('location-modal');
+        document.getElementById('location-name').value = '';
+        state.pendingLocation = null;
+    } else {
+        showToast('Failed to save location', 'error');
+    }
+};
+
+window.reportAlert = async (type) => {
+    const res = await api.updatePresence({ 
+        type, 
+        lat: 12.9716, // Replace with actual current location
+        lng: 77.5946 
+    });
+    if (res) {
+        closeModal('report-modal');
+        showToast(`${type.toUpperCase()} alert posted!`, 'success');
+    }
+};
+
+async function handleGhostModeToggle(e) {
+    const isGhost = e.target.checked;
+    const res = await api.updateMe({ ghostMode: isGhost });
+    if (!res) {
+        e.target.checked = !isGhost; // Revert UI on failure
+        showToast('Failed to update Ghost Mode', 'error');
+    }
+}
+
+// ============================================================================
+// 12. ADMIN PANEL
+// ============================================================================
+
+window.loadAdminApplications = async () => {
+    if (!state.user?.isAdmin) return;
+    DOM.adminApplicationList.innerHTML = '<div class="text-center text-sub text-sm">Loading...</div>';
+    
+    const apps = await api.adminPendingAgents();
+    
+    if (!apps || apps.length === 0) {
+        DOM.adminApplicationList.innerHTML = '<div class="text-center text-sub text-sm">No pending applications.</div>';
+        return;
+    }
+
+    DOM.adminApplicationList.innerHTML = apps.map(app => `
+        <div class="post-card" style="margin-bottom: 10px;">
+            <div class="flex justify-between align-center mb-2">
+                <strong>${escapeHTML(app.name)} (${app.phone})</strong>
+                <span class="tag tag-warning">Pending</span>
+            </div>
+            <p class="text-sm text-sub">Vehicle: ${escapeHTML(app.vehicle || 'N/A')} (${app.vehicleType || 'N/A'})</p>
+            <p class="text-sm text-sub">City: ${escapeHTML(app.city || 'N/A')}</p>
+            <div class="flex gap-2 mt-3" style="display:flex; gap:10px;">
+                <button class="btn btn-primary btn-sm w-full" onclick="handleAdminAction('${app.uid}', true)">Approve</button>
+                <button class="btn btn-danger btn-sm w-full" onclick="handleAdminAction('${app.uid}', false)">Reject</button>
+            </div>
+        </div>
+    `).join('');
+};
+
+window.handleAdminAction = async (uid, approve) => {
+    const actionText = approve ? 'Approving' : 'Rejecting';
+    showToast(`${actionText} application...`, 'info');
+    
+    const res = await api.adminApproveAgent(uid, approve);
+    if (res) {
+        showToast(`Application ${approve ? 'approved' : 'rejected'}!`, 'success');
+        loadAdminApplications(); // Refresh list
+    } else {
+        showToast('Action failed: ' + api.lastError, 'error');
+    }
+};
+
+// ============================================================================
+// 13. UTILITIES
+// ============================================================================
+
+/**
+ * Convert a File object to a Base64 string.
+ */
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+    });
+}
+
+/**
+ * Escape HTML to prevent XSS when rendering user-generated content.
+ */
+function escapeHTML(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+/**
+ * Display a toast notification.
+ * (Requires corresponding CSS, but falls back to console/alert if not present)
+ */
+function showToast(message, type = 'info') {
+    console.log(`[Toast - ${type}] ${message}`);
+    // Simple fallback: use alert for errors, log for others.
+    // Replace this with a proper UI toast library or custom implementation.
+    if (type === 'error') {
+        alert(`Error: ${message}`);
+    }
+    // You can inject a toast div into the DOM here if you have CSS for it.
+}
+
+/**
+ * Format an ISO date string into a relative time (e.g., "2h ago").
+ */
+function timeAgo(isoString) {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    const now = new Date();
+    const seconds = Math.floor((now - date) / 1000);
+    
+    let interval = Math.floor(seconds / 31536000);
+    if (interval > 1) return interval + "y ago";
+    interval = Math.floor(seconds / 2592000);
+    if (interval > 1) return interval + "mo ago";
+    interval = Math.floor(seconds / 86400);
+    if (interval > 1) return interval + "d ago";
+    interval = Math.floor(seconds / 3600);
+    if (interval > 1) return interval + "h ago";
+    interval = Math.floor(seconds / 60);
+    if (interval > 1) return interval + "m ago";
+    return "Just now";
+}
