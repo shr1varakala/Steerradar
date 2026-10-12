@@ -117,6 +117,13 @@
                             <i class="fas fa-crosshairs"></i>
                         </button>
                     </div>
+
+                    <!-- Trip Controls (SteerAgent Only) -->
+                    <div id="trip-controls" class="map-overlay-controls hidden" style="bottom: 170px;">
+                        <button id="trip-btn" class="btn-primary btn-circle" onclick="toggleTrip()" title="Start/End Trip">
+                            <i class="fas fa-play"></i>
+                        </button>
+                    </div>
                 </div>
             </section>
 
@@ -159,6 +166,11 @@
                         <input type="checkbox" id="toggle-share-upi" class="toggle-switch" checked>
                     </div>
                 </div>
+
+                <!-- Trip History Button -->
+                <button class="btn btn-secondary w-full mt-3" onclick="openModal('trips-modal')">
+                    <i class="fas fa-route"></i> My Trips
+                </button>
 
                 <button class="btn btn-secondary w-full mt-4" onclick="handleLogout()">Log Out</button>
             </section>
@@ -412,7 +424,22 @@
         </div>
     </div>
 
-    <!-- 7. ADMIN PANEL MODAL -->
+    <!-- 7. TRIP HISTORY MODAL -->
+    <div id="trips-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">My Trips</h2>
+                <button onclick="closeModal('trips-modal')" class="close-btn">&times;</button>
+            </div>
+            <div id="trips-list">
+                <div class="text-center text-sub text-sm" style="padding:20px;">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 8. ADMIN PANEL MODAL -->
     <div id="admin-modal" class="modal-overlay hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -427,7 +454,7 @@
         </div>
     </div>
 
-    <!-- 8. REPORT ALERT MODAL (SteerAgent Only) -->
+    <!-- 9. REPORT ALERT MODAL (SteerAgent Only) -->
     <div id="report-modal" class="modal-overlay hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -444,7 +471,7 @@
         </div>
     </div>
 
-    <!-- 9. SAVE LOCATION MODAL -->
+    <!-- 10. SAVE LOCATION MODAL -->
     <div id="location-modal" class="modal-overlay hidden">
         <div class="modal-content">
             <div class="modal-header">
