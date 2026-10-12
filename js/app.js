@@ -1,20 +1,15 @@
 /**
  * ============================================================================
- * STEERADAR FRONTEND CONTROLLER (v7.5)
+ * STEERADAR FRONTEND CONTROLLER (v8.0)
  * ============================================================================
- * A production-ready client for the SteerRadar community ride network.
+ * Complete client for the SteerRadar community ride network.
  * 
- * KEY MODULES:
- * - State Management (centralized reactive state)
- * - Authentication (OTP + Password)
- * - Role-Based UI (RearAgent vs SteerAgent vs Admin)
- * - Lanes (Live driver routes)
- * - Hive (Community feed with media embeds)
- * - Chat (Real-time messaging)
- * - Map (Leaflet integration with presence tracking)
- * - Live Presence (real-time GPS broadcasting)
- * - Notifications (toast system)
- * - Network Resilience (auto-retry, offline detection)
+ * MODULES:
+ * - Auth (OTP + Password)             - Role-Based UI (RearAgent/SteerAgent/Admin)
+ * - Lanes (Live driver routes)        - Hive (Community feed with media embeds)
+ * - Chat (Real-time messaging)        - Map (Leaflet + presence tracking)
+ * - Trips (Route tracking + history)  - Notifications (Toast system)
+ * - PWA (Installable app + offline)   - Network resilience (auto-retry)
  * ============================================================================
  */
 
@@ -25,15 +20,16 @@ import { mapModule } from './map.js';
 // 1. CONFIGURATION & CONSTANTS
 // ============================================================================
 const CONFIG = window.STEERADAR || {};
-const POLL_INTERVAL = 20000; // 20s refresh for lanes/hive
-const PRESENCE_INTERVAL = 20000; // 20s GPS broadcast for agents
-const CHAT_POLL_INTERVAL = 5000; // 5s chat refresh while open
+const POLL_INTERVAL = 20000;      // Refresh lanes/hive every 20s
+const PRESENCE_INTERVAL = 20000;  // GPS broadcast for agents
+const CHAT_POLL_INTERVAL = 5000;  // Chat message polling
+const TOAST_DURATION = CONFIG.TOAST_DURATION_MS || 2400;
 
 // ============================================================================
-// 2. APPLICATION STATE (Centralized)
+// 2. APPLICATION STATE
 // ============================================================================
 const state = {
-    // User
+    // Session
     user: null,
     session: null,
     
@@ -46,24 +42,27 @@ const state = {
     hive: [],
     messages: {},
     savedPoints: [],
+    activeVehicles: [],
     
     // Signup flow
     signupData: null,
-    verifiedOtp: null,
     
-    // Map
+    // Map & Location
     pendingLocation: null,
     userLocation: null,
-    activeVehicles: [],
+    activeTrip: null,
+    tripPolyline: null,
+    tripPoints: [],
+    tripWatchId: null,
     
-    // Intervals (for cleanup)
+    // Intervals
     intervals: {
         poll: null,
         presence: null,
         chat: null
     },
     
-    // UI State
+    // Loading flags
     isLoading: {
         lanes: false,
         hive: false,
@@ -75,7 +74,7 @@ const state = {
 };
 
 // ============================================================================
-// 3. DOM CACHE (Avoid querying DOM repeatedly)
+// 3. DOM CACHE
 // ============================================================================
 const DOM = {
     // Views
@@ -95,12 +94,8 @@ const DOM = {
     
     // SteerAgent
     steerAgentControls: document.getElementById('steer-agent-controls'),
-    
-    // Containers
-    lanesView: document.getElementById('view-lanes'),
-    hiveView: document.getElementById('view-hive'),
-    lanesList: null, // Set dynamically
-    hiveList: null,  // Set dynamically
+    tripControls: document.getElementById('trip-controls'),
+    tripBtn: document.getElementById('trip-btn'),
     
     // Chat
     chatView: document.getElementById('hive-chat-view'),
@@ -116,15 +111,16 @@ const DOM = {
 // 4. INITIALIZATION
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('%c SteerRadar booted ', 'background:#00d4a0;color:#000;font-weight:800;padding:4px 10px;border-radius:4px;');
+    console.log('%c SteerRadar v8.0 booted ', 
+        'background:#00d4a0;color:#000;font-weight:800;padding:4px 10px;border-radius:4px;');
     
     setupEventListeners();
     setupNetworkHandlers();
     setupVisibilityHandlers();
+    setupPWAInstallPrompt();
     initMap();
     
     await checkSession();
-    startAutoRefresh();
 });
 
 // ============================================================================
@@ -134,7 +130,7 @@ function setupEventListeners() {
     // Auth
     document.getElementById('signin-form')?.addEventListener('submit', handleSignIn);
     document.getElementById('signup-form')?.addEventListener('submit', handleSignupStep1);
-    document.getElementById('otp-modal')?.addEventListener('keypress', (e) => {
+    document.getElementById('otp-code')?.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') verifyOTP();
     });
     
@@ -149,17 +145,29 @@ function setupEventListeners() {
     // Settings
     document.getElementById('toggle-ghost-mode')?.addEventListener('change', handleGhostModeToggle);
     
-    // Chat
-    DOM.chatInput?.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+    // Chat input enter key
+    DOM.chatInput?.addEventListener('keypress', (e) => { 
+        if (e.key === 'Enter') sendMessage(); 
+    });
+    
+    // Trip button
+    DOM.tripBtn?.addEventListener('click', toggleTrip);
     
     // Image previews
     document.getElementById('lane-photo')?.addEventListener('change', (e) => previewImage(e, 'lane-photo-preview'));
     document.getElementById('hive-photo')?.addEventListener('change', (e) => previewImage(e, 'hive-photo-preview'));
     document.getElementById('edit-avatar')?.addEventListener('change', (e) => previewImage(e, 'edit-avatar-preview'));
+    
+    // Close modals on overlay click
+    document.querySelectorAll('.modal-overlay').forEach(overlay => {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) overlay.classList.add('hidden');
+        });
+    });
 }
 
 // ============================================================================
-// 6. NETWORK & VISIBILITY HANDLERS
+// 6. NETWORK & VISIBILITY
 // ============================================================================
 function setupNetworkHandlers() {
     window.addEventListener('online', () => {
@@ -177,7 +185,7 @@ function setupNetworkHandlers() {
 function setupVisibilityHandlers() {
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
-            stopPolling(); // Save battery when hidden
+            stopPolling();
         } else {
             startAutoRefresh();
             refreshAll();
@@ -222,7 +230,7 @@ async function handleSignIn(e) {
         state.user = res.user;
         closeModal('auth-modal');
         updateUIForRole();
-        showToast(`Welcome back, ${state.user.name}!`, 'success');
+        showToast(`Welcome back, ${state.user.name.split(' ')[0]}!`, 'success');
     } else {
         showToast(api.lastError || 'Login failed', 'error');
     }
@@ -249,7 +257,7 @@ async function handleSignupStep1(e) {
         return showToast('Passwords do not match', 'error');
     }
     if (!/^[6-9]\d{9}$/.test(data.phone)) {
-        return showToast('Enter a valid 10-digit mobile number', 'warning');
+        return showToast('Enter a valid 10-digit Indian mobile number', 'warning');
     }
     
     state.signupData = data;
@@ -261,7 +269,8 @@ async function handleSignupStep1(e) {
     resetButton(btn, 'Send OTP');
     
     if (res && res.sent) {
-        document.getElementById('otp-message').textContent = `Enter the 6-digit code sent to ${res.to || data.email}`;
+        document.getElementById('otp-message').textContent = 
+            `Enter the 6-digit code sent to ${res.to || data.email}`;
         openModal('otp-modal');
         setTimeout(() => document.getElementById('otp-code')?.focus(), 300);
     } else {
@@ -303,9 +312,9 @@ window.verifyOTP = async () => {
 
 window.handleLogout = async () => {
     if (!confirm('Are you sure you want to log out?')) return;
+    stopPolling();
     await api.logout();
     api.clearSession();
-    stopPolling();
     window.location.reload();
 };
 
@@ -318,19 +327,23 @@ function updateUIForRole() {
     const avatar = state.user.photo || `https://i.pravatar.cc/150?u=${state.user.phone}`;
     
     // Header
-    DOM.headerAvatar.src = avatar;
-    DOM.headerAvatar.onerror = () => { DOM.headerAvatar.src = 'https://i.pravatar.cc/150?img=11'; };
+    if (DOM.headerAvatar) {
+        DOM.headerAvatar.src = avatar;
+        DOM.headerAvatar.onerror = () => { DOM.headerAvatar.src = 'https://i.pravatar.cc/150?img=11'; };
+    }
     
     // Profile
-    DOM.profileName.textContent = state.user.name;
-    DOM.profileRole.textContent = state.user.role === 'agent' ? 'SteerAgent' : 'RearAgent';
+    if (DOM.profileName) DOM.profileName.textContent = state.user.name;
+    if (DOM.profileRole) DOM.profileRole.textContent = 
+        state.user.role === 'agent' ? 'SteerAgent' : 'RearAgent';
     if (DOM.profileAvatar) DOM.profileAvatar.src = avatar;
     
-    // Admin
+    // Admin button
     toggleVisibility(DOM.adminBtn, state.user.isAdmin);
     
-    // SteerAgent controls
+    // SteerAgent map controls
     toggleVisibility(DOM.steerAgentControls, state.user.role === 'agent');
+    toggleVisibility(DOM.tripControls, state.user.role === 'agent');
     
     // SteerAgent application flow
     if (state.user.role === 'agent') {
@@ -356,7 +369,7 @@ function updateUIForRole() {
         greeting.textContent = `${timeGreeting}, ${state.user.name.split(' ')[0]} 👋`;
     }
     
-    // Load initial data
+    // Load data
     refreshAll();
 }
 
@@ -366,20 +379,14 @@ function updateUIForRole() {
 window.switchTab = (tabName) => {
     state.activeTab = tabName;
     
-    // Nav buttons
     DOM.navButtons.forEach(btn => btn.classList.remove('active'));
     document.getElementById(`nav-${tabName}`)?.classList.add('active');
     
-    // Views
     DOM.views.forEach(view => view.classList.remove('active'));
     document.getElementById(`view-${tabName}`)?.classList.add('active');
     
-    // Contextual loading
     if (tabName === 'map') {
-        setTimeout(() => {
-            const m = mapModule.getMap();
-            if (m) m.invalidateSize();
-        }, 150);
+        setTimeout(() => mapModule.refreshSize?.(), 150);
     }
     if (tabName === 'hive') loadHive();
     if (tabName === 'lanes') loadLanes();
@@ -394,11 +401,12 @@ window.openModal = (id) => {
     if (!modal) return;
     modal.classList.remove('hidden');
     
-    // Contextual data loads
     if (id === 'admin-modal') loadAdminApplications();
+    if (id === 'trips-modal') loadTrips();
     
-    // Focus first input
-    setTimeout(() => modal.querySelector('input:not([type=file]), textarea')?.focus(), 250);
+    setTimeout(() => 
+        modal.querySelector('input:not([type=file]), textarea')?.focus(), 250
+    );
 };
 
 window.closeModal = (id) => document.getElementById(id)?.classList.add('hidden');
@@ -414,7 +422,7 @@ window.switchAuthTab = (tab) => {
 // 11. AUTO-REFRESH & POLLING
 // ============================================================================
 function startAutoRefresh() {
-    stopPolling(); // Clear any existing
+    stopPolling();
     
     state.intervals.poll = setInterval(() => {
         if (!state.isOnline) return;
@@ -422,10 +430,9 @@ function startAutoRefresh() {
         if (state.activeTab === 'hive') loadHive(true);
     }, POLL_INTERVAL);
     
-    // Presence broadcast (SteerAgents only)
     if (state.user?.role === 'agent') {
         state.intervals.presence = setInterval(broadcastPresence, PRESENCE_INTERVAL);
-        broadcastPresence(); // Immediate
+        broadcastPresence();
     }
 }
 
@@ -437,19 +444,22 @@ function stopPolling() {
 }
 
 function refreshAll() {
+    startAutoRefresh();
     if (state.activeTab === 'lanes') loadLanes();
     if (state.activeTab === 'hive') loadHive();
 }
 
 // ============================================================================
-// 12. LANES (Live Drivers)
+// 12. LANES
 // ============================================================================
 async function loadLanes(silent = false) {
     if (!state.isOnline || state.isLoading.lanes) return;
     state.isLoading.lanes = true;
     
     const container = getLanesContainer();
-    if (!silent && container) container.innerHTML = skeletonCards(2);
+    if (!silent && container && !container.querySelector('.lane-card')) {
+        container.innerHTML = skeletonCards(2);
+    }
     
     const lanes = await api.listLanes();
     state.lanes = lanes;
@@ -462,7 +472,9 @@ async function loadLanes(silent = false) {
             <div class="empty-state">
                 <i class="fas fa-bus"></i>
                 <p>No active lanes right now.</p>
-                ${state.user?.role === 'agent' ? '<p class="text-xs mt-2">Tap <b>+</b> to create your first lane!</p>' : ''}
+                ${state.user?.role === 'agent' 
+                    ? '<p class="text-xs mt-2">Tap <b>+</b> to create your first lane!</p>' 
+                    : ''}
             </div>`;
         return;
     }
@@ -473,7 +485,6 @@ async function loadLanes(silent = false) {
 function getLanesContainer() {
     const header = document.querySelector('#view-lanes .section-header');
     if (!header) return null;
-    // Create or find the container
     let container = document.getElementById('lanes-list');
     if (!container) {
         container = document.createElement('div');
@@ -512,14 +523,17 @@ function createLaneCardHTML(lane) {
             </div>
             <div class="lane-footer">
                 <div class="driver-info">
-                    <img src="${lane.photo || 'https://i.pravatar.cc/150?img=12'}" class="driver-avatar" onerror="this.src='https://i.pravatar.cc/150?img=12'">
+                    <img src="${lane.photo || 'https://i.pravatar.cc/150?img=12'}" 
+                        class="driver-avatar" 
+                        onerror="this.src='https://i.pravatar.cc/150?img=12'">
                     <div>
                         <div class="driver-name">${escapeHTML(lane.ownerName || 'Driver')}</div>
                         <div class="driver-rating"><i class="fas fa-star"></i> SteerAgent</div>
                     </div>
                 </div>
                 <div class="lane-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="openChat('${lane.id}', '${escapeHTML(lane.ownerName || 'Driver')}')">
+                    <button class="btn btn-secondary btn-sm" 
+                        onclick="openChat('${lane.id}', '${escapeHTML(lane.ownerName || 'Driver')}')">
                         <i class="fas fa-comment"></i> Chat
                     </button>
                     <button class="btn btn-primary btn-sm" onclick="requestSeat('${lane.id}')">
@@ -532,12 +546,11 @@ function createLaneCardHTML(lane) {
 
 window.requestSeat = (laneId) => {
     if (!state.user) return showToast('Please sign in first', 'error');
-    // In the future: send a request to the SteerAgent's chat
     showToast('Seat request sent! The driver will respond in chat.', 'success');
 };
 
 // ============================================================================
-// 13. HIVE (Community Feed)
+// 13. HIVE
 // ============================================================================
 async function loadHive(silent = false) {
     if (!state.isOnline || state.isLoading.hive) return;
@@ -565,7 +578,6 @@ async function loadHive(silent = false) {
     
     container.innerHTML = posts.map(createHivePostHTML).join('');
     
-    // Re-render Instagram embeds if any
     if (window.instgrm) setTimeout(() => window.instgrm.Embeds.process(), 100);
 }
 
@@ -586,17 +598,24 @@ function createHivePostHTML(post) {
     let mediaHTML = '';
     
     if (post.photo) {
-        mediaHTML = `<div class="post-image"><img src="${post.photo}" alt="Post image" onerror="this.style.display='none'"></div>`;
+        mediaHTML = `<div class="post-image">
+            <img src="${post.photo}" alt="Post image" onerror="this.style.display='none'">
+        </div>`;
     } else if (post.mediaType === 'youtube' && post.mediaUrl) {
         const vid = extractYouTubeId(post.mediaUrl);
         if (vid) {
             mediaHTML = `<div style="margin-bottom:12px; border-radius:12px; overflow:hidden;">
-                <iframe width="100%" height="200" src="https://www.youtube.com/embed/${vid}" frameborder="0" allowfullscreen loading="lazy"></iframe>
+                <iframe width="100%" height="200" 
+                    src="https://www.youtube.com/embed/${vid}" 
+                    frameborder="0" allowfullscreen loading="lazy"></iframe>
             </div>`;
         }
     } else if (post.mediaType === 'instagram' && post.mediaUrl) {
         mediaHTML = `<div style="margin-bottom:12px;">
-            <blockquote class="instagram-media" data-instgrm-permalink="${post.mediaUrl}" data-instgrm-version="14" style="width:100%; margin:0;"></blockquote>
+            <blockquote class="instagram-media" 
+                data-instgrm-permalink="${post.mediaUrl}" 
+                data-instgrm-version="14" 
+                style="width:100%; margin:0;"></blockquote>
         </div>`;
     }
     
@@ -605,7 +624,8 @@ function createHivePostHTML(post) {
     return `
         <div class="post-card">
             <div class="post-header">
-                <img src="${avatar}" class="driver-avatar avatar-lg" onerror="this.src='https://i.pravatar.cc/150?img=5'">
+                <img src="${avatar}" class="driver-avatar avatar-lg" 
+                    onerror="this.src='https://i.pravatar.cc/150?img=5'">
                 <div>
                     <div class="post-user">
                         ${escapeHTML(post.ownerName || 'User')}
@@ -634,7 +654,6 @@ window.toggleLike = async (postId, currentLikes) => {
     const wasLiked = el.dataset.liked === 'true';
     const delta = wasLiked ? -1 : 1;
     
-    // Optimistic update
     el.textContent = Math.max(0, currentLikes + delta);
     el.dataset.liked = (!wasLiked).toString();
     el.parentElement.style.color = wasLiked ? '' : 'var(--primary)';
@@ -652,7 +671,6 @@ window.openChat = async (roomId, name) => {
     
     await loadMessages(roomId);
     
-    // Start chat polling
     if (state.intervals.chat) clearInterval(state.intervals.chat);
     state.intervals.chat = setInterval(() => loadMessages(roomId, true), CHAT_POLL_INTERVAL);
 };
@@ -702,7 +720,6 @@ window.sendMessage = async () => {
     
     DOM.chatInput.value = '';
     
-    // Optimistic insert
     DOM.chatMessages.insertAdjacentHTML('beforeend', `
         <div class="chat-message sent">${escapeHTML(text)}</div>
     `);
@@ -722,27 +739,18 @@ function scrollToBottom() {
 window.handleFABClick = () => {
     if (!state.user) return showToast('Please sign in first', 'error');
     
-    switch (state.activeTab) {
-        case 'lanes':
-            if (state.user.role !== 'agent') {
-                return showToast('Only SteerAgents can create lanes', 'warning');
-            }
-            openModal('create-lane-modal');
-            break;
-        case 'hive':
-            openModal('create-hive-modal');
-            break;
-        case 'map':
-            // On map tab, give a choice — for now, default to hive
-            openModal('create-hive-modal');
-            break;
-        default:
-            openModal('create-hive-modal');
+    if (state.activeTab === 'lanes') {
+        if (state.user.role !== 'agent') {
+            return showToast('Only SteerAgents can create lanes. Apply in Profile.', 'warning');
+        }
+        openModal('create-lane-modal');
+    } else {
+        openModal('create-hive-modal');
     }
 };
 
 // ============================================================================
-// 16. CONTENT CREATION — LANE
+// 16. CREATE LANE
 // ============================================================================
 async function handleCreateLane(e) {
     e.preventDefault();
@@ -786,7 +794,7 @@ async function handleCreateLane(e) {
 }
 
 // ============================================================================
-// 17. CONTENT CREATION — HIVE
+// 17. CREATE HIVE POST
 // ============================================================================
 async function handleCreateHivePost(e) {
     e.preventDefault();
@@ -843,7 +851,7 @@ async function handleCreateHivePost(e) {
 }
 
 // ============================================================================
-// 18. PROFILE EDITING
+// 18. PROFILE EDIT
 // ============================================================================
 window.openEditProfile = () => {
     if (!state.user) return;
@@ -907,7 +915,6 @@ async function handleSteerAgentApplication(e) {
             throw new Error('Please upload all required documents');
         }
         
-        // Upload all 3 docs in parallel for speed
         const [licenseRes, rcRes, selfieRes] = await Promise.all([
             api.uploadImage(await fileToBase64(licenseFile), 'vehicles'),
             api.uploadImage(await fileToBase64(rcFile), 'vehicles'),
@@ -931,10 +938,9 @@ async function handleSteerAgentApplication(e) {
         const res = await api.becomeAgent(payload);
         
         if (res) {
-            // Also update UPI
-            if (document.getElementById('sa-upi-id').value) {
-                await api.updateMe({ upiId: document.getElementById('sa-upi-id').value.trim() });
-            }
+            const upi = document.getElementById('sa-upi-id').value.trim();
+            if (upi) await api.updateMe({ upiId: upi });
+            
             showToast('Application submitted! Awaiting admin approval.', 'success');
             closeModal('steer-agent-modal');
             state.user.agentStatus = 'pending';
@@ -1054,11 +1060,10 @@ async function loadSavedPoints() {
     if (!state.user) return;
     const points = await api.myPoints();
     state.savedPoints = points || [];
-    // You could render these in the profile view here
 }
 
 // ============================================================================
-// 22. LIVE PRESENCE (SteerAgent GPS Broadcast)
+// 22. LIVE PRESENCE
 // ============================================================================
 async function broadcastPresence() {
     if (!state.user || state.user.role !== 'agent' || state.user.ghostMode) return;
@@ -1077,19 +1082,23 @@ async function broadcastPresence() {
                 vehicle: state.user.vehicle || ''
             });
             
-            // Also fetch active vehicles to display on map
+            // Update trip polyline if trip is active
+            if (state.activeTrip) {
+                const point = [latitude, longitude];
+                const last = state.tripPoints[state.tripPoints.length - 1];
+                if (!last || calculateDistance([last, point]) > 0.01) {
+                    state.tripPoints.push(point);
+                    mapModule.updatePolyline?.(state.tripPoints);
+                }
+            }
+            
             const vehicles = await api.activeVehicles();
             state.activeVehicles = vehicles;
-            renderActiveVehicles();
+            mapModule.renderVehicles?.(vehicles);
         },
         (err) => console.warn('Location error:', err.message),
         { enableHighAccuracy: true, maximumAge: 15000, timeout: 10000 }
     );
-}
-
-function renderActiveVehicles() {
-    // Optional: drop markers for other agents on the map
-    // mapModule.renderVehicles(state.activeVehicles);
 }
 
 // ============================================================================
@@ -1103,7 +1112,7 @@ window.reportAlert = async (type) => {
     
     const res = await api.reportAlert({ type, lat, lng });
     if (res) {
-        mapModule.addAlertMarker(lat, lng, type);
+        mapModule.addAlertMarker?.(lat, lng, type);
         closeModal('report-modal');
         showToast(`${type.toUpperCase()} alert posted!`, 'success');
     } else {
@@ -1134,7 +1143,157 @@ async function handleGhostModeToggle(e) {
 }
 
 // ============================================================================
-// 25. IMAGE PREVIEW
+// 25. TRIP MANAGEMENT
+// ============================================================================
+window.toggleTrip = async () => {
+    if (!state.user || state.user.role !== 'agent') {
+        return showToast('Only SteerAgents can start trips', 'warning');
+    }
+    
+    const btn = DOM.tripBtn;
+    
+    if (state.activeTrip) {
+        // END TRIP
+        setButtonLoading(btn, '');
+        const endLat = state.userLocation?.lat || null;
+        const endLng = state.userLocation?.lng || null;
+        
+        const res = await api.endTrip(state.activeTrip.id, {
+            endLat,
+            endLng,
+            distanceKm: calculateDistance(state.tripPoints)
+        });
+        
+        resetButton(btn, '<i class="fas fa-play"></i>');
+        btn.classList.remove('active');
+        
+        if (res) {
+            showToast(`Trip ended! Distance: ${calculateDistance(state.tripPoints)} km`, 'success');
+            state.activeTrip = null;
+            state.tripPoints = [];
+            state.tripPolyline = null;
+            mapModule.clearPolylines?.();
+            
+            if (state.tripWatchId !== null) {
+                navigator.geolocation.clearWatch(state.tripWatchId);
+                state.tripWatchId = null;
+            }
+        } else {
+            showToast('Failed to end trip', 'error');
+        }
+    } else {
+        // START TRIP
+        setButtonLoading(btn, '');
+        const startLat = state.userLocation?.lat || CONFIG.DEFAULT_CENTER?.lat || 17.3850;
+        const startLng = state.userLocation?.lng || CONFIG.DEFAULT_CENTER?.lng || 78.4867;
+        
+        const res = await api.startTrip({ startLat, startLng });
+        resetButton(btn, '<i class="fas fa-stop"></i>');
+        
+        if (res) {
+            showToast('Trip started! Share your route.', 'success');
+            state.activeTrip = res;
+            state.tripPoints = [[startLat, startLng]];
+            btn.classList.add('active');
+            
+            state.tripPolyline = mapModule.drawPolyline?.(state.tripPoints);
+            
+            startTripTracking();
+        } else {
+            showToast('Failed to start trip', 'error');
+        }
+    }
+};
+
+function startTripTracking() {
+    if (!navigator.geolocation) return;
+    
+    state.tripWatchId = navigator.geolocation.watchPosition(
+        (pos) => {
+            const { latitude, longitude } = pos.coords;
+            const point = [latitude, longitude];
+            
+            const last = state.tripPoints[state.tripPoints.length - 1];
+            if (last && calculateDistance([last, point]) < 0.01) return;
+            
+            state.tripPoints.push(point);
+            mapModule.updatePolyline?.(state.tripPoints);
+            
+            api.updatePresence({
+                lat: latitude,
+                lng: longitude,
+                vehicle: state.user.vehicle || ''
+            });
+        },
+        (err) => console.warn('Trip tracking error:', err.message),
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+    );
+}
+
+function calculateDistance(points) {
+    if (!points || points.length < 2) return 0;
+    let total = 0;
+    for (let i = 1; i < points.length; i++) {
+        const [lat1, lon1] = points[i-1];
+        const [lat2, lon2] = points[i];
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 + 
+                  Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * 
+                  Math.sin(dLon/2)**2;
+        total += R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+    return Math.round(total * 100) / 100;
+}
+
+window.loadTrips = async () => {
+    const container = document.getElementById('trips-list');
+    if (!container) return;
+    
+    container.innerHTML = `
+        <div class="text-center text-sub text-sm" style="padding:20px;">
+            <div class="spinner"></div>
+        </div>`;
+    
+    const trips = await api.myTrips();
+    if (!trips || !trips.length) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-route"></i>
+                <p>No trips yet.</p>
+            </div>`;
+        return;
+    }
+    
+    container.innerHTML = trips.map(trip => {
+        const isActive = trip.status === 'active';
+        const start = trip.startedAt ? new Date(trip.startedAt).toLocaleString() : 'Unknown';
+        const end = trip.endedAt ? new Date(trip.endedAt).toLocaleString() : 'Ongoing';
+        const distance = trip.distanceKm ? `${trip.distanceKm} km` : '—';
+        
+        return `
+            <div class="trip-card">
+                <div class="trip-header">
+                    <span class="trip-status ${isActive ? 'active' : 'ended'}">
+                        ${isActive ? 'ACTIVE' : 'ENDED'}
+                    </span>
+                    <span class="trip-time">${timeAgo(trip.createdAt)}</span>
+                </div>
+                <div class="trip-route">
+                    <i class="fas fa-map-pin"></i>
+                    <span>${start} → ${end}</span>
+                </div>
+                <div class="trip-distance">
+                    <i class="fas fa-road"></i> ${distance}
+                </div>
+            </div>
+        `;
+    }).join('');
+};
+
+// ============================================================================
+// 26. IMAGE PREVIEW
 // ============================================================================
 function previewImage(event, previewId) {
     const file = event.target.files?.[0];
@@ -1154,7 +1313,7 @@ function previewImage(event, previewId) {
 }
 
 // ============================================================================
-// 26. TOAST NOTIFICATIONS
+// 27. TOASTS
 // ============================================================================
 function showToast(message, type = 'info') {
     let container = document.getElementById('toast-container');
@@ -1176,15 +1335,14 @@ function showToast(message, type = 'info') {
     toast.innerHTML = `<i class="fas ${icons[type] || icons.info}"></i><span>${escapeHTML(message)}</span>`;
     container.appendChild(toast);
     
-    // Auto remove
     setTimeout(() => {
         toast.classList.add('fade-out');
         setTimeout(() => toast.remove(), 300);
-    }, CONFIG.TOAST_DURATION_MS || 2400);
+    }, TOAST_DURATION);
 }
 
 // ============================================================================
-// 27. UTILITY FUNCTIONS
+// 28. UTILITIES
 // ============================================================================
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
@@ -1217,17 +1375,23 @@ function timeAgo(isoString) {
 }
 
 function extractYouTubeId(url) {
-    const match = url.match(/(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/);
+    const match = url.match(
+        /(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/
+    );
     return match ? match[1] : null;
 }
 
 function setButtonLoading(btn, text) {
+    if (!btn) return;
     btn.disabled = true;
-    btn.dataset.originalText = btn.textContent;
-    btn.innerHTML = `<span class="spinner"></span> ${text}`;
+    if (!btn.dataset.originalText) {
+        btn.dataset.originalText = btn.innerHTML;
+    }
+    btn.innerHTML = text ? `<span class="spinner"></span> ${text}` : '<span class="spinner"></span>';
 }
 
 function resetButton(btn, fallback) {
+    if (!btn) return;
     btn.disabled = false;
     btn.innerHTML = btn.dataset.originalText || fallback;
 }
@@ -1238,15 +1402,58 @@ function toggleVisibility(el, show) {
 }
 
 function skeletonCards(count) {
-    return Array.from({ length: count }).map(() => `
-        <div class="skeleton skeleton-card"></div>
-    `).join('');
+    return Array.from({ length: count }).map(() => 
+        `<div class="skeleton skeleton-card"></div>`
+    ).join('');
 }
 
 // ============================================================================
-// 28. GLOBAL EXPORTS (Attach to window for inline handlers)
+// 29. PWA INSTALL PROMPT
+// ============================================================================
+function setupPWAInstallPrompt() {
+    let deferredPrompt = null;
+    
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        
+        setTimeout(() => {
+            if (!document.getElementById('pwa-install-btn') && deferredPrompt) {
+                const btn = document.createElement('button');
+                btn.id = 'pwa-install-btn';
+                btn.className = 'btn btn-primary';
+                btn.style.cssText = `
+                    position:fixed; bottom:180px; right:20px; z-index:200; 
+                    box-shadow: 0 8px 24px rgba(0,212,160,0.5); 
+                    padding: 10px 16px; font-size: 13px;
+                `;
+                btn.innerHTML = '<i class="fas fa-download"></i> Install App';
+                btn.onclick = async () => {
+                    if (!deferredPrompt) return;
+                    deferredPrompt.prompt();
+                    const { outcome } = await deferredPrompt.userChoice;
+                    console.log('[PWA] Install outcome:', outcome);
+                    deferredPrompt = null;
+                    btn.remove();
+                };
+                document.body.appendChild(btn);
+                setTimeout(() => btn.remove(), 30000);
+            }
+        }, 3000);
+    });
+    
+    window.addEventListener('appinstalled', () => {
+        showToast('SteerRadar installed! 🎉', 'success');
+        document.getElementById('pwa-install-btn')?.remove();
+    });
+}
+
+// ============================================================================
+// 30. GLOBAL EXPORTS
 // ============================================================================
 window.toggleGhostMode = () => {
     const checkbox = document.getElementById('toggle-ghost-mode');
     if (checkbox) checkbox.click();
 };
+
+console.log('[app] All handlers initialized');
