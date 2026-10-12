@@ -1,5 +1,5 @@
 // js/api.js - Gateway for every Steeradar backend call.
-// v6.1: no shared secret. Auth = phone + token from session storage.
+// v6.2: Fixed CORS, reduced timeout, added exponential backoff retry.
 
 const CFG = window.STEERADAR || {};
 
@@ -11,7 +11,7 @@ export const api = {
   get phone() { return localStorage.getItem('steeradar-phone') || ''; },
   get token() { return localStorage.getItem('steeradar-token') || ''; },
 
-  async call(action, params = {}) {
+  async call(action, params = {}, retries = 2) {
     if (!this.url) { this.lastError = 'No backend URL'; return null; }
     this.lastError = '';
     this.lastAction = action;
@@ -22,12 +22,13 @@ export const api = {
     if (this.token) body.token = this.token;
 
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 25000);
+    // FIX 1: Reduced timeout from 25s to 10s for better UX
+    const timer = setTimeout(() => ctrl.abort(), 10000);
 
     try {
       const res = await fetch(this.url, {
         method: 'POST',
-        redirect: 'follow',
+        // FIX 2: Removed redirect: 'follow'. GAS redirects break CORS.
         signal: ctrl.signal,
         body: JSON.stringify(body),
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -44,6 +45,19 @@ export const api = {
       }
       return data.data;
     } catch (e) {
+      // FIX 3: Exponential backoff retry for network errors/cold starts
+      const isNetworkError = e.name === 'TypeError' || 
+                             e.message.includes('Failed to fetch') || 
+                             e.name === 'AbortError';
+      
+      if (isNetworkError && retries > 0) {
+        const delay = 1000 * (3 - retries); // 1 second, then 2 seconds
+        console.warn(`[api] ${action} failed (${e.message}). Retrying in ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+        clearTimeout(timer); // Clear the old timer before recursing
+        return this.call(action, params, retries - 1);
+      }
+
       this.lastError = e.name === 'AbortError' ? 'Timed out' : (e.message || String(e));
       console.warn('[api]', action, '->', this.lastError);
       return null;
