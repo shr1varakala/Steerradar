@@ -1,597 +1,454 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#FFFFFF">
-<title>Steeradar — Community Rides</title>
-<link rel="icon" type="image/png" href="./steerardar-logo.png">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-<link rel="stylesheet" href="./styles.css">
-
-<!-- CRITICAL: Only the gate gets inline-styled. Everything else uses styles.css -->
-<style>
-#onboardGate {
-  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: #FFFFFF; color: #111827;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  padding: 24px; z-index: 99999;
-  overflow-y: auto; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-}
-#onboardGate.gate-hidden { display: none; }
-#bootError {
-  display: none; position: fixed; inset: 0; background: #FFFFFF;
-  z-index: 999999; padding: 40px 24px; overflow-y: auto;
-  font-family: -apple-system, sans-serif;
-}
-#bootError.show { display: block; }
-#bootError h2 { color: #DC2626; margin: 0 0 12px; font-size: 1.3rem; }
-#bootError pre {
-  background: #F1F3F6; padding: 14px; border-radius: 10px;
-  font-family: monospace; font-size: 0.72rem; color: #DC2626;
-  white-space: pre-wrap; word-break: break-all; margin-bottom: 20px;
-  max-height: 300px; overflow-y: auto;
-}
-#bootError button { padding: 14px 28px; border-radius: 12px; background: #0D9488; color: #fff; font-weight: 700; border: none; cursor: pointer; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SteerRadar · Community Ride Network</title>
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Main Stylesheet -->
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-<!-- ERROR OVERLAY -->
-<div id="bootError">
-  <h2>Something went wrong</h2>
-  <p>The app could not start. Error details below:</p>
-  <pre id="bootErrorText">Loading...</pre>
-  <button onclick="location.reload()">Reload</button>
-</div>
+    <!-- ================= MAIN APP CONTAINER ================= -->
+    <div id="app-container">
+        
+        <!-- HEADER -->
+        <header id="main-header">
+            <div class="logo-text">
+                <i class="fas fa-satellite-dish"></i> SteerRadar
+            </div>
+            <div class="flex align-center" style="gap: 15px;">
+                <button id="admin-panel-btn" class="hidden btn btn-secondary btn-sm" onclick="openModal('admin-modal')">
+                    <i class="fas fa-shield-alt"></i> Admin
+                </button>
+                <i class="fas fa-bell text-sub icon-btn"></i>
+                <img src="https://i.pravatar.cc/150?img=11" alt="Profile" class="user-avatar" id="header-avatar" onclick="switchTab('profile')">
+            </div>
+        </header>
 
-<script>
-window.__errs = [];
-window.__showErr = function (msg) {
-  window.__errs.push(msg);
-  var el = document.getElementById('bootError');
-  var txt = document.getElementById('bootErrorText');
-  if (el && txt) { txt.textContent = window.__errs.join('\n\n---\n\n'); el.classList.add('show'); }
-};
-window.addEventListener('error', function (e) {
-  var loc = e.filename ? e.filename.split('/').pop() + ':' + e.lineno : '';
-  window.__showErr('[' + loc + '] ' + (e.message || 'Unknown'));
-});
-window.addEventListener('unhandledrejection', function (e) {
-  window.__showErr('Promise: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason)));
-});
-</script>
+        <!-- MAIN VIEWS -->
+        <main>
+            <!-- 1. LANES VIEW (Live Drivers) -->
+            <section id="view-lanes" class="view-section active">
+                <div class="flex justify-between align-center mb-20">
+                    <div>
+                        <h2 class="view-title">Live Drivers</h2>
+                        <p class="text-sub">Real-time community updates</p>
+                    </div>
+                    <button class="btn btn-secondary btn-sm">
+                        <i class="fas fa-filter"></i> All Lanes
+                    </button>
+                </div>
 
-<!-- ═══ ONBOARDING GATE ═══ -->
-<div id="onboardGate">
-  <div class="onboard-logo">
-    <img src="./steerardar-logo.png" alt="Steeradar"
-      onerror="this.style.display='none';this.parentNode.innerHTML='<div style=\'font-size:3rem\'>🚗</div>'">
-  </div>
-  <h1 class="onboard-title"><span>Steer</span><span class="adar">adar</span><span class="dot">.</span></h1>
-  <p class="onboard-tagline">Live community rides. Enter your vehicle to unlock.</p>
+                <!-- Lane Card 1 -->
+                <div class="lane-card">
+                    <div class="lane-header">
+                        <div class="seat-indicator">
+                            <div class="seat-inner">
+                                <span class="seat-count">6</span>
+                                <span class="seat-label">Seats</span>
+                            </div>
+                        </div>
+                        <div class="lane-details">
+                            <div class="lane-title">Downtown Central</div>
+                            <div class="lane-route">
+                                <i class="fas fa-bus"></i> Maple → Oak → Center St → Downtown
+                            </div>
+                            <div class="lane-tags">
+                                <span class="tag tag-live">● LIVE • ON TIME</span>
+                                <span class="tag tag-fare">$2.50</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="lane-footer">
+                        <div class="driver-info">
+                            <img src="https://i.pravatar.cc/150?img=12" class="driver-avatar">
+                            <div>
+                                <div class="driver-name">Marcus T.</div>
+                                <div class="driver-rating"><i class="fas fa-star"></i> 4.9 • Driver</div>
+                            </div>
+                        </div>
+                        <div class="lane-actions">
+                            <button class="btn btn-secondary btn-sm" onclick="openChat('Downtown Central')"><i class="fas fa-comment"></i> Chat</button>
+                            <button class="btn btn-primary btn-sm"><i class="fas fa-chair"></i> Request</button>
+                        </div>
+                    </div>
+                </div>
 
-  <div class="onboard-card">
-    <div class="oc-label">Vehicle number <span class="req">REQUIRED</span></div>
-    <div class="vehicle-input-wrap">
-      <input type="text" id="onboardVehicle" placeholder="Enter vehicle number" maxlength="15" autocomplete="off" autocapitalize="characters">
-    </div>
-    <div class="oc-hint">Format like <span class="example">KA01AB1234</span></div>
-    <button class="oc-btn" id="onboardBtn" disabled>Continue</button>
-  </div>
+                <!-- Lane Card 2 -->
+                <div class="lane-card">
+                    <div class="lane-header">
+                        <div class="seat-indicator" style="--percentage: 40%; --accent: var(--warning);">
+                            <div class="seat-inner">
+                                <span class="seat-count">3</span>
+                                <span class="seat-label">Seats</span>
+                            </div>
+                        </div>
+                        <div class="lane-details">
+                            <div class="lane-title">Riverside Heights</div>
+                            <div class="lane-route">
+                                <i class="fas fa-bus"></i> Pine → River Rd → Bridge → Heights
+                            </div>
+                            <div class="lane-tags">
+                                <span class="tag tag-warning">● LIVE • DELAYED</span>
+                                <span class="tag tag-fare">$2.50</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="lane-footer">
+                        <div class="driver-info">
+                            <img src="https://i.pravatar.cc/150?img=32" class="driver-avatar">
+                            <div>
+                                <div class="driver-name">Aisha B.</div>
+                                <div class="driver-rating"><i class="fas fa-star"></i> 4.8 • Driver</div>
+                            </div>
+                        </div>
+                        <div class="lane-actions">
+                            <button class="btn btn-secondary btn-sm" onclick="openChat('Riverside Heights')"><i class="fas fa-comment"></i> Chat</button>
+                            <button class="btn btn-primary btn-sm"><i class="fas fa-chair"></i> Request</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
-  <div class="oc-features">
-    <div class="oc-feature"><div class="ic">📍</div>Live map</div>
-    <div class="oc-feature"><div class="ic">💬</div>Peer chat</div>
-    <div class="oc-feature"><div class="ic">📡</div>Local mesh</div>
-    <div class="oc-feature"><div class="ic">🐝</div>Community</div>
-  </div>
-  <p class="onboard-foot">Your vehicle number is stored locally and used as your Steeradar identity.</p>
-</div>
+            <!-- 2. HIVE VIEW (Community Feed) -->
+            <section id="view-hive" class="view-section">
+                <div class="text-center mb-20">
+                    <h2 class="hive-title">Hive</h2>
+                    <p class="text-sub">Your community. All aboard.</p>
+                </div>
 
-<!-- ═══ PHOTOS STEP ═══ -->
-<div id="onboardPhotos" style="display:none" class="onboard-photos-step">
-  <h2 class="onboard-title" style="font-size:2rem">Almost there</h2>
-  <p class="onboard-tagline">Add your photos. Plate and UPI QR are stored privately; they are never shown to other users.</p>
-  <div class="photo-grid">
-    <label class="photo-card" data-slot="avatar">
-      <input type="file" accept="image/*" capture="user" hidden>
-      <div class="photo-preview"><span class="photo-placeholder">📷</span></div>
-      <div class="photo-label">Your photo</div>
-    </label>
-    <label class="photo-card" data-slot="vehiclePhoto">
-      <input type="file" accept="image/*" capture="environment" hidden>
-      <div class="photo-preview"><span class="photo-placeholder">🚗</span></div>
-      <div class="photo-label">Vehicle photo</div>
-    </label>
-    <label class="photo-card" data-slot="platePhoto">
-      <input type="file" accept="image/*" capture="environment" hidden>
-      <div class="photo-preview"><span class="photo-placeholder">🔢</span></div>
-      <div class="photo-label">Number plate</div>
-    </label>
-    <label class="photo-card" data-slot="upiQr">
-      <input type="file" accept="image/*" hidden>
-      <div class="photo-preview"><span class="photo-placeholder">💳</span></div>
-      <div class="photo-label">UPI QR</div>
-    </label>
-  </div>
-  <button class="oc-btn" id="onboardPhotosDone" disabled style="max-width:400px;width:100%">Save and unlock</button>
-  <button class="btn-secondary" id="onboardPhotosSkip" style="margin-top:8px;max-width:400px;width:100%">Skip for now</button>
-</div>
+                <!-- Stories -->
+                <div class="stories-container">
+                    <div class="story-item">
+                        <div class="story-avatar story-add">
+                            <i class="fas fa-plus"></i>
+                        </div>
+                        <span class="story-name">Your story</span>
+                    </div>
+                    <div class="story-item">
+                        <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=5" alt="Ananya"></div>
+                        <span class="story-name">Ananya</span>
+                    </div>
+                    <div class="story-item">
+                        <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=8" alt="Rohit"></div>
+                        <span class="story-name">Rohit</span>
+                    </div>
+                    <div class="story-item">
+                        <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=9" alt="Meera"></div>
+                        <span class="story-name">Meera</span>
+                    </div>
+                    <div class="story-item">
+                        <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=15" alt="Arjun"></div>
+                        <span class="story-name">Arjun</span>
+                    </div>
+                </div>
 
-<!-- ═══ MAIN APP ═══ -->
-<div id="app" class="app-shell">
-  <header>
-    <div class="logo" id="logoTrigger" title="Long-press for diagnostics">
-      <img class="logo-img" src="./steerardar-logo.png" alt="Steeradar"
-        onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<div style=\'font-size:1.5rem\'>🚗</div>')">
-      <div class="logo-text"><span>Steer</span><span class="adar">adar</span><span class="dot">.</span></div>
-    </div>
-    <div class="header-actions">
-      <button class="vehicle-badge" id="vehicleBadge" title="Settings">
-        <span id="vehicleBadgeText">—</span>
-      </button>
-      <button class="header-btn" id="notifBtn" title="Notifications" aria-label="Enable notifications">🔔</button>
-      <button class="avatar-btn" id="avatarBtn" aria-label="Open settings">?</button>
-    </div>
-  </header>
+                <!-- Greeting Card -->
+                <div class="post-card greeting-card">
+                    <div class="flex justify-between align-center">
+                        <div>
+                            <h3 class="greeting-title">Good evening, Vihaan 👋</h3>
+                            <p class="text-sub mt-5">Here's what's happening in your community.</p>
+                            <span class="tag tag-live mt-10">Greenwood Heights</span>
+                        </div>
+                        <i class="fas fa-bus greeting-icon"></i>
+                    </div>
+                </div>
 
-  <div class="content">
+                <h3 class="section-title">Local posts</h3>
 
-    <!-- ─── PULSE (Map) ─── -->
-    <div id="pulseView" class="view active">
-      <div id="map"></div>
-      <button class="map-refresh" id="mapRefresh" title="Refresh map" aria-label="Refresh map">↻</button>
-      <div class="pulse-overlay">
-        <div class="location-pill" id="locationPill">
-          <span class="loc-text" id="locText">Locating…</span>
-          <span style="opacity:0.4">▼</span>
+                <!-- Post 1 -->
+                <div class="post-card">
+                    <div class="post-header">
+                        <img src="https://i.pravatar.cc/150?img=33" class="driver-avatar avatar-lg">
+                        <div>
+                            <div class="post-user">Karan (Driver) <i class="fas fa-check-circle verified-badge"></i></div>
+                            <div class="post-time">2h ago • Route 12</div>
+                        </div>
+                    </div>
+                    <div class="post-content">Morning traffic was smoother today! 🚌 Thanks for the patience, team. Let's keep making our rides better.</div>
+                    <div class="post-image">
+                        <i class="fas fa-play-circle play-icon"></i>
+                    </div>
+                    <div class="post-actions">
+                        <div class="post-action"><i class="far fa-heart"></i> 24</div>
+                        <div class="post-action"><i class="far fa-comment"></i> 7</div>
+                        <div class="post-action"><i class="fas fa-share"></i> 3</div>
+                        <div class="post-action"><i class="far fa-bookmark"></i></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. MAP VIEW -->
+            <section id="view-map" class="view-section view-map">
+                <div id="map-container">
+                    <!-- Placeholder for Leaflet/Google Maps -->
+                    <div class="map-placeholder">
+                        <div class="radar-pulse"></div>
+                        <div class="map-placeholder-content">
+                            <i class="fas fa-map-marked-alt map-icon"></i>
+                            <p class="text-sub mt-10">Map Integration Area</p>
+                            <p class="text-xs text-muted">(Leaflet/Google Maps goes here)</p>
+                        </div>
+                        
+                        <!-- Simulated Proximity Nodes -->
+                        <div class="proximity-node" style="top: 30%; left: 30%;">
+                            <img src="https://i.pravatar.cc/150?img=5" class="proximity-avatar">
+                            <p class="text-xs mt-5">12m • Looking</p>
+                        </div>
+                        <div class="proximity-node" style="top: 20%; right: 20%;">
+                            <img src="https://i.pravatar.cc/150?img=12" class="proximity-avatar" style="border-color: var(--warning);">
+                            <p class="text-xs mt-5">19m • Driving</p>
+                        </div>
+                    </div>
+
+                    <!-- SteerAgent Map Controls -->
+                    <div id="steer-agent-controls" class="map-overlay-controls hidden">
+                        <button class="btn-primary btn-circle" onclick="openModal('report-modal')" title="Report Alert">
+                            <i class="fas fa-exclamation-triangle"></i>
+                        </button>
+                        <button class="btn-secondary btn-circle" onclick="toggleGhostMode()" title="Ghost Mode">
+                            <i class="fas fa-ghost"></i>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. PROFILE VIEW -->
+            <section id="view-profile" class="view-section">
+                <div class="profile-header">
+                    <img src="https://i.pravatar.cc/150?img=11" class="profile-avatar">
+                    <h2 id="profile-name-display" class="profile-name">Sai Kumar</h2>
+                    <p id="profile-role-display" class="text-sub">RearAgent</p>
+                </div>
+
+                <!-- SteerAgent Upgrade Section -->
+                <div id="become-steer-agent-section" class="post-card upgrade-card">
+                    <h3 class="upgrade-title">Become a SteerAgent</h3>
+                    <p class="text-sub mb-15">Verify your documents to unlock driving features, post lanes, and accept payments.</p>
+                    <button class="btn btn-primary w-full" onclick="openModal('steer-agent-modal')">Apply Now</button>
+                </div>
+
+                <!-- Pending Status -->
+                <div id="steer-agent-pending-section" class="post-card pending-card hidden">
+                    <h3 class="pending-title">Application Under Review</h3>
+                    <p class="text-sub text-white">Your documents are being validated by an Admin. Check your email for updates.</p>
+                </div>
+
+                <!-- Settings -->
+                <div class="post-card">
+                    <h3 class="section-title">Preferences</h3>
+                    <div class="setting-row">
+                        <span>Ghost mode (hide from map)</span>
+                        <input type="checkbox" id="toggle-ghost-mode" class="toggle-switch">
+                    </div>
+                    <div class="setting-row">
+                        <span>Show my plate to other drivers</span>
+                        <input type="checkbox" id="toggle-show-plate" class="toggle-switch" checked>
+                    </div>
+                    <div class="setting-row">
+                        <span>Share UPI QR for payments</span>
+                        <input type="checkbox" id="toggle-share-upi" class="toggle-switch" checked>
+                    </div>
+                    <hr class="divider">
+                    <button class="btn btn-danger w-full" onclick="logout()">Log Out</button>
+                </div>
+            </section>
+        </main>
+
+        <!-- BOTTOM NAVIGATION -->
+        <nav id="bottom-nav">
+            <button onclick="switchTab('lanes')" class="active"><i class="fas fa-bus"></i> Lanes</button>
+            <button onclick="switchTab('map')"><i class="fas fa-map"></i> Map</button>
+            <button onclick="switchTab('hive')"><i class="fas fa-comments"></i> Hive</button>
+            <button onclick="switchTab('profile')"><i class="fas fa-user"></i> Profile</button>
+        </nav>
+
+        <!-- CHAT OVERLAY (Hive) -->
+        <div id="hive-chat-view" class="hidden">
+            <header class="chat-header">
+                <button onclick="closeChat()" class="icon-btn"><i class="fas fa-arrow-left"></i></button>
+                <h3 id="chat-room-title" class="chat-title">Hive Chat</h3>
+            </header>
+            
+            <!-- Messages Container (Oldest at top, Newest at bottom) -->
+            <div id="chat-messages-container" class="chat-container">
+                <!-- Messages will be injected here by JS -->
+                <div class="chat-message received">Hello! Are you available for a ride?</div>
+                <div class="chat-message sent">Yes, I am 5 minutes away.</div>
+            </div>
+            
+            <!-- Chat Input -->
+            <div class="chat-input-area">
+                <button id="request-payment-btn" class="btn-primary btn-circle btn-payment" title="Request UPI Payment">
+                    <i class="fas fa-rupee-sign"></i>
+                </button>
+                <input type="text" id="chat-input" placeholder="Type a message..." class="chat-input">
+                <button onclick="sendMessage()" class="btn-primary btn-circle"><i class="fas fa-paper-plane"></i></button>
+            </div>
         </div>
-        <div class="filter-row">
-          <button class="chip active" data-filter="live">⚡ Live now</button>
-          <button class="chip" data-filter="all">All</button>
-          <button class="chip" data-filter="seats">Has seats</button>
-          <button class="chip" data-filter="mine">My lanes</button>
+    </div>
+
+    <!-- ================= MODALS ================= -->
+
+    <!-- 1. AUTHENTICATION MODAL (Sign In / Sign Up) -->
+    <div id="auth-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="auth-tabs">
+                <button id="tab-signin" class="auth-tab active" onclick="switchAuthTab('signin')">Sign In</button>
+                <button id="tab-signup" class="auth-tab" onclick="switchAuthTab('signup')">Create Account</button>
+                <button onclick="closeModal('auth-modal')" class="close-btn">&times;</button>
+            </div>
+
+            <!-- Sign In Form -->
+            <form id="signin-form">
+                <div class="form-group">
+                    <label>Phone or Email</label>
+                    <input type="text" id="signin-identity" required placeholder="Enter phone or email" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="signin-password" required placeholder="Enter password" class="form-input">
+                </div>
+                <button type="submit" class="btn btn-primary w-full">Sign In</button>
+            </form>
+
+            <!-- Sign Up Form -->
+            <form id="signup-form" class="hidden">
+                <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" id="signup-name" required placeholder="Sai Kumar" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Phone Number</label>
+                    <input type="tel" id="signup-phone" required placeholder="9876543210" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Email Address</label>
+                    <input type="email" id="signup-email" required placeholder="sai@example.com" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="signup-password" required placeholder="Create a strong password" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Confirm Password</label>
+                    <input type="password" id="signup-confirm-password" required placeholder="Re-enter password" class="form-input">
+                </div>
+                <button type="submit" class="btn btn-primary w-full">Create RearAgent Account</button>
+                <p class="text-center text-xs text-sub mt-10">By signing up, you agree to our Terms of Service.</p>
+            </form>
         </div>
-      </div>
-      <div class="map-lane-card" id="mapLaneCard"></div>
     </div>
 
-    <!-- ─── LANES ─── -->
-    <div id="lanesView" class="view">
-      <div class="view-header">
-        <span class="right-pill" id="connBadge"><span class="live-dot"></span> Connecting</span>
-        <h2>Live Lanes</h2>
-        <p>Real-time community rides near you</p>
-      </div>
-      <div class="lane-list" id="laneList"></div>
-    </div>
-
-    <!-- ─── NEAR ─── -->
-    <div id="nearView" class="view">
-      <div class="view-header">
-        <h2>Near</h2>
-        <p>Vehicles and people around you</p>
-      </div>
-      <div class="local-room-banner">
-        <div class="lrb-head">
-          <div class="lrb-icon">📡</div>
-          <div style="flex:1;min-width:0">
-            <div class="lrb-title">Local Steeradar</div>
-            <div class="lrb-sub" id="localRoomSub">Finding your neighbourhood…</div>
-          </div>
+    <!-- 2. STEERAGENT APPLICATION MODAL -->
+    <div id="steer-agent-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">SteerAgent Application</h2>
+                <button onclick="closeModal('steer-agent-modal')" class="close-btn">&times;</button>
+            </div>
+            <form id="steer-agent-form">
+                <div class="form-group">
+                    <label>Vehicle Number</label>
+                    <input type="text" id="sa-vehicle-number" required placeholder="KA01AB1234" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Vehicle Type</label>
+                    <select id="sa-vehicle-type" required class="form-input">
+                        <option value="">Select...</option>
+                        <option value="bike">Bike</option>
+                        <option value="car">Car</option>
+                        <option value="auto">Auto</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>UPI ID (For Payments)</label>
+                    <input type="text" id="sa-upi-id" required placeholder="yourname@upi" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Driver's License Photo</label>
+                    <input type="file" id="sa-license" accept="image/*" required class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Vehicle RC Photo</label>
+                    <input type="file" id="sa-rc" accept="image/*" required class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Selfie with Vehicle</label>
+                    <input type="file" id="sa-selfie" accept="image/*" required class="form-input">
+                </div>
+                
+                <div class="agreement-box">
+                    <strong>SteerAgent Agreement</strong>
+                    <p>By checking this box, I confirm that all documents uploaded are authentic and belong to me. I agree to follow all traffic rules, maintain my vehicle responsibly, and treat all RearAgents with respect. I understand that any violation may lead to immediate termination of my SteerAgent account.</p>
+                </div>
+                <div class="flex align-center mt-10">
+                    <input type="checkbox" id="sa-agreement" required class="toggle-switch">
+                    <label for="sa-agreement" class="ml-10 text-sm">I agree to the SteerAgent Agreement.</label>
+                </div>
+                
+                <button type="submit" class="btn btn-primary w-full mt-20">Submit Application</button>
+            </form>
         </div>
-        <div class="lrb-stats">
-          <div class="lrb-stat">👥 <span id="localPeerCount">0 peers</span></div>
+    </div>
+
+    <!-- 3. ADMIN PANEL MODAL -->
+    <div id="admin-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Admin Panel</h2>
+                <button onclick="closeModal('admin-modal')" class="close-btn">&times;</button>
+            </div>
+            <h3 class="section-title">Pending SteerAgent Applications</h3>
+            <div id="admin-application-list" class="mt-15">
+                <!-- Applications will be injected here by JS -->
+                <p class="text-sub text-sm">No pending applications.</p>
+            </div>
         </div>
-        <div class="lrb-room">Room: <span id="localRoomId">—</span></div>
-      </div>
-      <div class="proximity-wrap" id="proximityWrap"></div>
-      <div class="section-label">Bluetooth nearby</div>
-      <div class="bt-panel">
-        <div class="bt-head">
-          <div class="bt-title">📶 Discover devices</div>
-          <button class="bt-scan-btn" id="btScanBtn">Scan</button>
+    </div>
+
+    <!-- 4. REPORT ALERT MODAL (SteerAgent Only) -->
+    <div id="report-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Report Road Condition</h2>
+                <button onclick="closeModal('report-modal')" class="close-btn">&times;</button>
+            </div>
+            <p class="text-sub text-sm mb-15">Drop a quick alert on the map for other drivers.</p>
+            <div class="report-grid">
+                <button class="btn btn-secondary" onclick="reportAlert('traffic')">🚧 Traffic</button>
+                <button class="btn btn-secondary" onclick="reportAlert('pothole')">🕳️ Pothole</button>
+                <button class="btn btn-secondary" onclick="reportAlert('police')">🚓 Police</button>
+                <button class="btn btn-secondary" onclick="reportAlert('accident')">⚠️ Accident</button>
+            </div>
         </div>
-        <div id="btDevices"><div class="bt-empty">Tap Scan to discover nearby Bluetooth devices</div></div>
-      </div>
-      <div class="section-label">Local chat rooms <span class="see-all" id="chatRoomsCount"></span></div>
-      <div id="roomList"></div>
     </div>
 
-    <!-- ─── HIVE ─── -->
-    <div id="hiveView" class="view">
-      <div class="hive-header">
-        <h1>Hive</h1>
-        <p>Your community. All aboard.</p>
-      </div>
-      <div class="story-row" id="storyRow"></div>
-      <div class="greeting-card">
-        <h3 id="greetingText">Good evening 👋</h3>
-        <p>Here's what's happening in your community.</p>
-        <span class="tag" id="greetingTag">Your neighbourhood</span>
-      </div>
-      <div class="section-label">Local posts <span class="see-all" id="hiveCount"></span></div>
-      <div id="hiveFeed"></div>
+    <!-- 5. SAVE LOCATION MODAL -->
+    <div id="location-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Save Location</h2>
+                <button onclick="closeModal('location-modal')" class="close-btn">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>Location Name</label>
+                <input type="text" id="location-name" placeholder="e.g., Good Parking Spot" class="form-input">
+            </div>
+            <button class="btn btn-primary w-full" onclick="confirmSaveLocation()">Save to My Profile</button>
+        </div>
     </div>
 
-  </div>
-
-  <button class="fab" id="fabBtn">
-    <span class="fab-icon">+</span>
-    <span class="fab-text">
-      <span id="fabLabel">Post my lane</span>
-      <span class="fab-sub">Share seats and route</span>
-    </span>
-  </button>
-
-  <nav class="bottom-nav" aria-label="Main">
-    <button class="nav-item active" data-tab="pulse">📊 Pulse</button>
-    <button class="nav-item" data-tab="lanes">🚌 Lanes</button>
-    <button class="nav-item" data-tab="near">📡 Near</button>
-    <button class="nav-item" data-tab="hive">🐝 Hive</button>
-  </nav>
-</div>
-
-<!-- ═══ LIVE TRACKING HUD ═══ -->
-<div class="track-hud" id="trackHud">
-  <div class="track-row-1">
-    <div class="track-avatar" id="trackAvatar">?</div>
-    <div class="track-info">
-      <div class="track-name" id="trackName">—</div>
-      <div class="track-meta" id="trackMeta">—</div>
-    </div>
-    <button class="track-close" id="trackClose" aria-label="Stop tracking">✕</button>
-  </div>
-  <div class="track-row-2">
-    <div class="track-stat"><div class="track-stat-val" id="trackDist">—</div><div class="track-stat-lbl">Away</div></div>
-    <div class="track-stat"><div class="track-stat-val" id="trackEta">—</div><div class="track-stat-lbl">ETA</div></div>
-    <div class="track-stat"><div class="track-stat-val" id="trackSeats">—</div><div class="track-stat-lbl">Seats</div></div>
-  </div>
-  <button class="track-chat" id="trackChat">💬 Message driver</button>
-</div>
-
-<!-- ═══ POST LANE MODAL ═══ -->
-<div class="modal-overlay" role="dialog" aria-modal="true" id="postModal"><div class="modal">
-  <div class="modal-head"><h3>Post your lane</h3><button class="modal-close" data-close="#postModal">✕</button></div>
-  <label>What are you driving?</label>
-  <div class="vehicle-type-grid" id="vehicleTypeGrid"></div>
-  <label>Destination</label>
-  <input type="text" id="pDest" placeholder="e.g. Downtown Central">
-  <label>Route stops (comma separated)</label>
-  <input type="text" id="pRoute" placeholder="Maple, Oak, Center St">
-  <label>Seats available</label>
-  <div class="seat-selector" id="seatSelector">
-    <button class="seat-btn" data-seats="40"><span class="num">40</span><span class="lbl">Bus</span></button>
-    <button class="seat-btn" data-seats="4"><span class="num">4</span><span class="lbl">Car</span></button>
-    <button class="seat-btn" data-seats="3"><span class="num">3</span><span class="lbl">Auto</span></button>
-    <button class="seat-btn" data-seats="2"><span class="num">2</span><span class="lbl">Shared</span></button>
-    <button class="seat-btn" data-seats="1"><span class="num">1</span><span class="lbl">Single</span></button>
-    <button class="seat-btn" data-seats="0"><span class="num">0</span><span class="lbl">Full</span></button>
-  </div>
-  <label>Fare (₹)</label>
-  <input type="number" id="pFare" value="20" min="0">
-  <button class="btn-primary" id="postConfirm">Go live</button>
-</div></div>
-
-<!-- ═══ EDIT LANE MODAL ═══ -->
-<div class="modal-overlay" role="dialog" aria-modal="true" id="editLaneModal"><div class="modal">
-  <div class="modal-head"><h3>Edit lane</h3><button class="modal-close" data-close="#editLaneModal">✕</button></div>
-  <label>Destination</label><input type="text" id="elDest">
-  <label>Route stops (comma separated)</label><input type="text" id="elRoute">
-  <label>Seats still available</label>
-  <div class="seat-selector" id="elSeatSelector">
-    <button class="seat-btn" data-seats="40"><span class="num">40</span><span class="lbl">Bus</span></button>
-    <button class="seat-btn" data-seats="4"><span class="num">4</span><span class="lbl">Car</span></button>
-    <button class="seat-btn" data-seats="3"><span class="num">3</span><span class="lbl">Auto</span></button>
-    <button class="seat-btn" data-seats="2"><span class="num">2</span><span class="lbl">Shared</span></button>
-    <button class="seat-btn" data-seats="1"><span class="num">1</span><span class="lbl">Single</span></button>
-    <button class="seat-btn" data-seats="0"><span class="num">0</span><span class="lbl">Full</span></button>
-  </div>
-  <label>Fare (₹)</label><input type="number" id="elFare" min="0">
-  <button class="btn-primary" id="editLaneConfirm">Save changes</button>
-  <button id="editLaneDelete" style="margin-top:8px;width:100%;padding:14px;border-radius:12px;background:#FEE2E2;color:#DC2626;border:1px solid #DC2626;font-weight:700">Delete this lane</button>
-</div></div>
-
-<!-- ═══ REQUEST MODAL ═══ -->
-<div class="modal-overlay" role="dialog" aria-modal="true" id="requestModal"><div class="modal">
-  <div class="modal-head"><h3>Request a seat</h3><button class="modal-close" data-close="#requestModal">✕</button></div>
-  <p id="reqInfo" style="color:#4B5563;font-size:.85rem;margin-bottom:16px"></p>
-  <label>Your message (optional)</label>
-  <textarea id="reqMsg" placeholder="Hi! I'm at the Main Gate, can you wait 2 minutes?"></textarea>
-  <button class="btn-primary" id="reqConfirm">Send request</button>
-</div></div>
-
-<!-- ═══ CHAT MODAL ═══ -->
-<div class="modal-overlay" role="dialog" aria-modal="true" id="chatModal"><div class="modal" style="height:82vh;display:flex;flex-direction:column">
-  <div class="chat-header">
-    <div class="ch-avatar" id="chatAvatar">?</div>
-    <div class="ch-info">
-      <div class="ch-name" id="chatName">Lane chat</div>
-      <div class="ch-status" id="chatStatusWrap"><span class="live-dot"></span><span id="chatStatus">Connecting…</span></div>
-    </div>
-    <button class="modal-close" data-close="#chatModal">✕</button>
-  </div>
-  <div class="chat-messages" id="chatMessages"></div>
-  <div class="chat-input-row">
-    <input type="text" id="chatInput" placeholder="Type a message…" autocomplete="off" maxlength="1000" aria-label="Message">
-    <button class="send-btn" id="chatSend" aria-label="Send message">➤</button>
-  </div>
-</div></div>
-
-<!-- ═══ HIVE COMPOSE MODAL ═══ -->
-<div class="modal-overlay" role="dialog" aria-modal="true" id="hiveComposeModal"><div class="modal">
-  <div class="modal-head"><h3>New post</h3><button class="modal-close" data-close="#hiveComposeModal">✕</button></div>
-  <label>Heading</label>
-  <input type="text" id="hiveHeading" placeholder="A short headline (optional)" maxlength="80">
-  <label>Body</label>
-  <textarea id="hiveBody" placeholder="What do you want to share with your community?" rows="6" maxlength="2000"></textarea>
-  <label>Tags (comma separated, optional)</label>
-  <input type="text" id="hiveTags" placeholder="traffic, cricket, route12" autocomplete="off">
-  <button class="btn-primary" id="hiveComposeSubmit" style="margin-top:12px">Post to Hive</button>
-  <button class="btn-secondary" id="hiveComposeCancel" style="margin-top:8px">Cancel</button>
-</div></div>
-
-<!-- ═══ SETTINGS MODAL - FULL ═══ -->
-<div class="modal-overlay" role="dialog" aria-modal="true" id="settingsModal"><div class="modal" style="max-height:90vh">
-  <div class="modal-head"><h3>Settings</h3><button class="modal-close" data-close="#settingsModal">✕</button></div>
-
-  <!-- Account -->
-  <div class="settings-section">
-    <div class="settings-label">Account</div>
-    <div class="settings-row">
-      <span>Sign in with OTP</span>
-      <button class="btn-sm-danger" id="authOpenBtn" style="background:var(--teal);color:#fff;border-color:var(--teal)">Sign in</button>
-    </div>
-    <div class="settings-row">
-      <span>Sign out</span>
-      <button class="btn-sm-danger" id="authLogoutBtn">Sign out</button>
-    </div>
-  </div>
-
-  <!-- Profile -->
-  <div class="settings-section">
-    <div class="settings-label">Profile</div>
-    <input type="text" id="setName" placeholder="Your display name">
-    <div class="vehicle-input-wrap" style="margin-top:8px">
-      <input type="text" id="setVehicle" placeholder="Vehicle number" maxlength="15" autocapitalize="characters">
-    </div>
-  </div>
-
-  <!-- Appearance -->
-  <div class="settings-section">
-    <div class="settings-label">Appearance</div>
-    <div class="settings-row">
-      <span>Theme</span>
-      <div class="segmented" id="setTheme">
-        <button data-value="light" class="active">Light</button>
-        <button data-value="dark">Dark</button>
-      </div>
-    </div>
-    <div class="settings-row">
-      <span>Map style</span>
-      <div class="segmented" id="setMapStyle">
-        <button data-value="bright" class="active">Bright</button>
-        <button data-value="dark">Dark</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Notifications -->
-  <div class="settings-section">
-    <div class="settings-label">Notifications</div>
-    <div class="settings-row"><span>Chat messages</span><label class="switch"><input type="checkbox" id="setNotifChat" checked><span></span></label></div>
-    <div class="settings-row"><span>Seat requests</span><label class="switch"><input type="checkbox" id="setNotifSeats" checked><span></span></label></div>
-  </div>
-
-  <!-- Privacy -->
-  <div class="settings-section">
-    <div class="settings-label">Privacy</div>
-    <div class="settings-row"><span>Share exact GPS with peers</span><label class="switch"><input type="checkbox" id="setShareGps" checked><span></span></label></div>
-    <div class="settings-row"><span>Visible in local mesh</span><label class="switch"><input type="checkbox" id="setVisible" checked><span></span></label></div>
-    <div class="settings-row"><span>Ghost mode (hide from map)</span><label class="switch"><input type="checkbox" id="setGhost"><span></span></label></div>
-    <div class="settings-row"><span>Show my plate to other drivers</span><label class="switch"><input type="checkbox" id="setShowPlate" checked><span></span></label></div>
-    <div class="settings-row"><span>Share UPI QR for payments</span><label class="switch"><input type="checkbox" id="setShareUpi" checked><span></span></label></div>
-  </div>
-
-  <!-- Universal DB -->
-  <div class="settings-section">
-    <div class="settings-label">Universal DB</div>
-    <div class="settings-row"><span>Cloud sync</span><label class="switch"><input type="checkbox" id="setCloudSync"><span></span></label></div>
-    <div class="cloud-status" id="cloudStatus">Not connected</div>
-    <button class="btn-secondary" id="cloudTest" style="margin-top:8px">Test connection</button>
-    <div id="devModeBlock" style="display:none;margin-top:16px">
-      <div class="settings-label" style="margin-top:8px">Developer · cloud endpoint</div>
-      <input type="text" id="setCloudUrl" placeholder="https://script.google.com/macros/s/…/exec" aria-label="Apps Script URL">
-      <button class="btn-secondary" id="cloudSaveDev" style="margin-top:8px">Save endpoint</button>
-    </div>
-  </div>
-
-  <!-- Data -->
-  <div class="settings-section">
-    <div class="settings-label">Data</div>
-    <div class="settings-row"><span>Clear my published lanes</span><button class="btn-sm-danger" id="setClearLanes">Clear</button></div>
-    <div class="settings-row"><span>Reset all data</span><button class="btn-sm-danger" id="setResetAll">Reset</button></div>
-  </div>
-
-  <!-- About -->
-  <div class="settings-section">
-    <div class="settings-label">About</div>
-    <p style="font-size:0.78rem;color:#4B5563;line-height:1.6">
-      Steeradar v6.1 · Vanilla JS · MIT License<br>
-      Made by <a href="https://github.com/suryasticsai" target="_blank">@suryasticsai</a>
-    </p>
-    <p id="versionTap" style="font-size:0.7rem;color:#9CA3AF;margin-top:8px;user-select:none;cursor:pointer">
-      v6.1 — <span id="devModeHint">tap 5 times for diagnostics</span>
-    </p>
-  </div>
-
-  <button class="btn-primary" id="settingsSave">Save and close</button>
-</div></div>
-
-<!-- ═══ POST DETAIL MODAL ═══ -->
-<div class="modal-overlay" role="dialog" aria-modal="true" id="postDetailModal"><div class="modal">
-  <div class="modal-head"><h3 style="opacity:0;height:0;margin:0">Post</h3><button class="modal-close" data-close="#postDetailModal">✕</button></div>
-  <div class="post-detail" id="postDetailContent"></div>
-</div></div>
-
-<!-- ═══ AUTH MODAL ═══ -->
-<div class="modal-overlay" role="dialog" aria-modal="true" id="authModal"><div class="modal">
-  <div class="modal-head"><h3 id="authTitle">Create your account</h3><button class="modal-close" id="authClose">✕</button></div>
-  <div id="authStep1">
-    <label>Phone number</label>
-    <input type="tel" id="authPhone" placeholder="10-digit mobile" maxlength="10" inputmode="numeric">
-    <label>Email</label>
-    <input type="email" id="authEmail" placeholder="you@example.com">
-    <button class="btn-primary" id="authSendOtp" style="margin-top:8px">Send code</button>
-  </div>
-  <div id="authStep2" style="display:none">
-    <label>Verification code</label>
-    <input type="text" id="authCode" placeholder="6-digit code" maxlength="6" inputmode="numeric">
-    <button class="btn-primary" id="authVerifyOtp" style="margin-top:8px">Verify</button>
-  </div>
-  <div id="authStep3" style="display:none">
-    <label>Your name</label>
-    <input type="text" id="authName" placeholder="e.g. Sai Varakala">
-    <label>Username</label>
-    <input type="text" id="authUsername" placeholder="e.g. sai_varakala" autocapitalize="none">
-    <button class="btn-primary" id="authConfirm" style="margin-top:8px">Create account</button>
-  </div>
-</div></div>
-
-<!-- ═══ LOG VIEWER MODAL ═══ -->
-<div class="modal-overlay" role="dialog" aria-modal="true" id="logModal"><div class="modal" style="height:85vh;display:flex;flex-direction:column">
-  <div class="modal-head"><h3>Diagnostics log</h3><button class="modal-close" data-close="#logModal">✕</button></div>
-  <div class="log-actions">
-    <button class="btn-secondary" id="logCopy" style="flex:1">📋 Copy</button>
-    <button class="btn-secondary" id="logClear" style="flex:1">🗑 Clear</button>
-    <button class="btn-secondary" id="logRefresh" style="flex:1">↻ Refresh</button>
-  </div>
-  <div class="log-content" id="logContent"><div class="log-empty">No logs yet.</div></div>
-</div></div>
-
-<div class="dialog-overlay" id="dialogOverlay"><div class="dialog">
-  <h3 id="dialogTitle">Confirm</h3>
-  <p id="dialogMsg"></p>
-  <input type="text" id="dialogInput" style="display:none">
-  <div class="dialog-actions">
-    <button class="btn-cancel" id="dialogCancel">Cancel</button>
-    <button class="btn-ok" id="dialogOk">OK</button>
-  </div>
-</div></div>
-
-<div class="toast" id="toast"></div>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-<script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-<script src="./config.js"></script>
-
-<!-- INLINE BOOT - guarantees gate works even if modules fail -->
-<script>
-(function() {
-  console.log('[Steeradar] Inline boot');
-
-  var vehicleInput = document.getElementById('onboardVehicle');
-  var onboardBtn = document.getElementById('onboardBtn');
-  var gate = document.getElementById('onboardGate');
-  var photosStep = document.getElementById('onboardPhotos');
-  var appEl = document.getElementById('app');
-
-  vehicleInput.addEventListener('input', function() {
-    this.value = this.value.toUpperCase();
-    var valid = /^[A-Z0-9]{4,15}$/.test(this.value.replace(/[\s-]/g, ''));
-    onboardBtn.disabled = !valid;
-  });
-  vehicleInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && !onboardBtn.disabled) onboardBtn.click();
-  });
-
-  onboardBtn.addEventListener('click', function() {
-    var v = vehicleInput.value.trim().replace(/[\s-]/g, '').toUpperCase();
-    if (!/^[A-Z0-9]{4,15}$/.test(v)) { alert('Enter a valid vehicle number'); return; }
-    localStorage.setItem('steeradar-vehicle', v);
-    window.__pendingVehicle = v;
-
-    if (photosStep) {
-      gate.classList.add('gate-hidden');
-      photosStep.style.display = 'flex';
-      wirePhotoStep();
-    } else {
-      startApp();
-    }
-  });
-
-  function wirePhotoStep() {
-    var doneBtn = document.getElementById('onboardPhotosDone');
-    var skipBtn = document.getElementById('onboardPhotosSkip');
-    var any = false;
-
-    document.querySelectorAll('#onboardPhotos .photo-card').forEach(function(card) {
-      var input = card.querySelector('input[type="file"]');
-      var preview = card.querySelector('.photo-preview');
-      if (!input || !preview) return;
-      input.addEventListener('change', function() {
-        var file = this.files[0]; if (!file) return;
-        preview.innerHTML = 'Uploading...';
-        var r = new FileReader();
-        r.onload = function(ev) {
-          preview.innerHTML = '<img src="' + ev.target.result + '" style="width:100%;height:100%;object-fit:cover">';
-          any = true;
-          if (doneBtn) doneBtn.disabled = false;
+    <!-- ================= SCRIPTS ================= -->
+    <script>
+        window.STEERADAR = {
+            SHEET_API_URL: 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE'
         };
-        r.readAsDataURL(file);
-      });
-    });
-    if (doneBtn) doneBtn.addEventListener('click', startApp);
-    if (skipBtn) skipBtn.addEventListener('click', startApp);
-  }
-
-  function startApp() {
-    var v = localStorage.getItem('steeradar-vehicle');
-    if (!v) return;
-    console.log('[Steeradar] Unlock for', v);
-    gate.classList.add('gate-hidden');
-    if (photosStep) photosStep.style.display = 'none';
-    appEl.classList.add('app-visible');
-
-    var badge = document.getElementById('vehicleBadgeText');
-    if (badge) badge.textContent = v;
-    var name = localStorage.getItem('steeradar-name') || '';
-    var avatar = document.getElementById('avatarBtn');
-    if (avatar) avatar.textContent = (name || '?').charAt(0).toUpperCase();
-
-    // Notify modules
-    window.dispatchEvent(new CustomEvent('steeradar:unlock', { detail: { vehicle: v } }));
-  }
-
-  var saved = localStorage.getItem('steeradar-vehicle');
-  if (saved && /^[A-Z0-9]{4,15}$/.test(saved)) {
-    startApp();
-  }
-
-  window.__steeradarInline = { startApp: startApp };
-})();
-</script>
-
-<!-- MODULE APP -->
-<script type="module" src="./js/app.js"></script>
-
-<!-- Watchdog -->
-<script>
-setTimeout(function() {
-  var gate = document.getElementById('onboardGate');
-  var appEl = document.getElementById('app');
-  var gateVisible = gate && !gate.classList.contains('gate-hidden');
-  var appVisible = appEl && appEl.classList.contains('app-visible');
-  if (!gateVisible && !appVisible) {
-    window.__showErr && window.__showErr('Neither gate nor app visible after 5s.');
-  }
-}, 5000);
-</script>
-
+    </script>
+    <script type="module" src="js/app.js"></script>
 </body>
 </html>
