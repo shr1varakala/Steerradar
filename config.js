@@ -6,11 +6,12 @@ window.STEERADAR = {
   CLOUD_SYNC_DEFAULT: true,
   APP_NAME: 'Steeradar',
   APP_VERSION: 'v7.0',
-  LOGO_URL: './steerardar-logo.png',
+  LOGO_URL: './steeradar-logo.png', // Fixed typo
 
+  // Updated to Hyderabad
   MAP_STYLE_BRIGHT: 'https://tiles.openfreemap.org/styles/bright',
   MAP_STYLE_DARK:   'https://tiles.openfreemap.org/styles/dark',
-  DEFAULT_CENTER:   { lat: 12.9716, lng: 77.5946 },
+  DEFAULT_CENTER:   { lat: 17.3850, lng: 78.4867 }, // Hyderabad Coordinates
   DEFAULT_ZOOM:     13,
 
   CLOUD_POLL_INTERVAL_MS: 15000,
