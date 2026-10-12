@@ -1,10 +1,8 @@
-// js/api.js - Gateway for every Steeradar backend call.
-// v6.2: Fixed CORS, reduced timeout, added exponential backoff retry.
-
-const CFG = window.STEERADAR || {};
+// js/api.js - Gateway for every SteerRadar backend call.
+import { CONFIG } from './config.js';
 
 export const api = {
-  url: CFG.SHEET_API_URL || '',
+  url: CONFIG.SHEET_API_URL || '',
   lastError: '',
   lastAction: '',
 
@@ -12,30 +10,27 @@ export const api = {
   get token() { return localStorage.getItem('steeradar-token') || ''; },
 
   async call(action, params = {}, retries = 2) {
-    if (!this.url) { this.lastError = 'No backend URL'; return null; }
+    if (!this.url) { this.lastError = 'No backend URL configured in config.js'; return null; }
     this.lastError = '';
     this.lastAction = action;
 
     const body = Object.assign({ action: action }, params);
-    // Attach auth for every call. Backend ignores it on public actions.
     if (this.phone) body.phone = this.phone;
     if (this.token) body.token = this.token;
 
     const ctrl = new AbortController();
-    // FIX 1: Reduced timeout from 25s to 10s for better UX
-    const timer = setTimeout(() => ctrl.abort(), 10000);
+    const timer = setTimeout(() => ctrl.abort(), 10000); // 10s timeout
 
     try {
       const res = await fetch(this.url, {
         method: 'POST',
-        // FIX 2: Removed redirect: 'follow'. GAS redirects break CORS.
         signal: ctrl.signal,
         body: JSON.stringify(body),
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       });
       const text = await res.text();
       let data;
-      try { data = JSON.parse(text); }
+      try { data = JSON.parse(text); } 
       catch (e) { throw new Error('Server returned non-JSON'); }
 
       if (data.error) {
@@ -45,19 +40,12 @@ export const api = {
       }
       return data.data;
     } catch (e) {
-      // FIX 3: Exponential backoff retry for network errors/cold starts
-      const isNetworkError = e.name === 'TypeError' || 
-                             e.message.includes('Failed to fetch') || 
-                             e.name === 'AbortError';
-      
+      const isNetworkError = e.name === 'TypeError' || e.message.includes('Failed to fetch') || e.name === 'AbortError';
       if (isNetworkError && retries > 0) {
-        const delay = 1000 * (3 - retries); // 1 second, then 2 seconds
-        console.warn(`[api] ${action} failed (${e.message}). Retrying in ${delay}ms...`);
-        await new Promise(r => setTimeout(r, delay));
-        clearTimeout(timer); // Clear the old timer before recursing
+        await new Promise(r => setTimeout(r, 1000 * (3 - retries)));
+        clearTimeout(timer);
         return this.call(action, params, retries - 1);
       }
-
       this.lastError = e.name === 'AbortError' ? 'Timed out' : (e.message || String(e));
       console.warn('[api]', action, '->', this.lastError);
       return null;
@@ -71,48 +59,29 @@ export const api = {
     return Array.isArray(r) ? r : [];
   },
 
-  ping() { return this.call('ping').then(r => r === 'pong'); },
-
-  // AUTH
-  sendOtp(phone, email, purpose) { return this.call('sendOtp', { phone, email, purpose }); },
-  verifyOtp(phone, code) { return this.call('verifyOtp', { phone, code }); },
-  register(data) { return this.call('register', data); },
-  login(data) { return this.call('login', data); },
+  // --- AUTH & USER ---
+  register(data) { return this.call('register', data); }, // { name, phone, email, password }
+  login(data) { return this.call('login', data); },       // { identity, password }
   logout() { return this.call('logout'); },
   checkSession() { return this.call('checkSession'); },
   getMe() { return this.call('getMe'); },
   updateMe(patch) { return this.call('updateMe', patch); },
 
-  // LANES
+  // --- STEERAGENT ROLE ---
+  upgradeToSteerAgent(data) { return this.call('upgradeToSteerAgent', data); }, 
+  getPendingApplications() { return this.list('getPendingApplications'); },
+  approveSteerAgent(phone) { return this.call('approveSteerAgent', { targetPhone: phone }); },
+  rejectSteerAgent(phone, reason) { return this.call('rejectSteerAgent', { targetPhone: phone, reason }); },
+
+  // --- LANES & HIVE ---
   listLanes() { return this.list('listLanes'); },
-  insertLane(row) { return this.call('insertLane', { row }); },
-  updateLane(id, row) { return this.call('updateLane', { id, row }); },
-  removeLane(id) { return this.call('removeLane', { id }); },
-
-  // HIVE
   listHive() { return this.list('listHive'); },
-  insertHive(row) { return this.call('insertHive', { row }); },
-  updateHive(id, row) { return this.call('updateHive', { id, row }); },
-  deleteHive(id) { return this.call('deleteHive', { id }); },
-  like(id, delta) { return this.call('like', { id, delta }); },
+  
+  // --- MAP & LOCATIONS ---
+  saveLocation(data) { return this.call('saveLocation', data); }, 
+  reportAlert(data) { return this.call('reportAlert', data); },   
 
-  // MESSAGES
+  // --- CHAT ---
   getMessages(roomId, limit) { return this.list('getMessages', { roomId, limit: limit || 50 }); },
   sendMessage(row) { return this.call('sendMessage', { row }); },
-
-  // PRESENCE
-  updatePresence(row) { return this.call('updatePresence', { row }); },
-  activeVehicles() { return this.list('activeVehicles'); },
-  removePresence() { return this.call('removePresence'); },
-
-  // TRIPS
-  startTrip(data) { return this.call('startTrip', data || {}); },
-  endTrip(data) { return this.call('endTrip', data); },
-  myTrips() { return this.list('myTrips'); },
-
-  // IMAGES
-  uploadImage(base64, folder) { return this.call('uploadImage', { base64, folder }); },
-  deleteImage(fileId) { return this.call('deleteImage', { fileId }); },
-
-  debug() { return this.call('debug'); },
 };
