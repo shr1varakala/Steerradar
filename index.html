@@ -4,8 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>SteerRadar · Community Ride Network</title>
+    
     <!-- FontAwesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Leaflet Map CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
     <!-- Main Stylesheet -->
     <link rel="stylesheet" href="css/style.css">
 </head>
@@ -13,7 +18,7 @@
 
     <!-- ================= MAIN APP CONTAINER ================= -->
     <div id="app-container">
-        
+
         <!-- HEADER -->
         <header id="main-header">
             <div class="logo-text">
@@ -42,76 +47,7 @@
                         <i class="fas fa-filter"></i> All Lanes
                     </button>
                 </div>
-
-                <!-- Lane Card 1 -->
-                <div class="lane-card">
-                    <div class="lane-header">
-                        <div class="seat-indicator">
-                            <div class="seat-inner">
-                                <span class="seat-count">6</span>
-                                <span class="seat-label">Seats</span>
-                            </div>
-                        </div>
-                        <div class="lane-details">
-                            <div class="lane-title">Downtown Central</div>
-                            <div class="lane-route">
-                                <i class="fas fa-bus"></i> Maple → Oak → Center St → Downtown
-                            </div>
-                            <div class="lane-tags">
-                                <span class="tag tag-live">● LIVE • ON TIME</span>
-                                <span class="tag tag-fare">$2.50</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="lane-footer">
-                        <div class="driver-info">
-                            <img src="https://i.pravatar.cc/150?img=12" class="driver-avatar">
-                            <div>
-                                <div class="driver-name">Marcus T.</div>
-                                <div class="driver-rating"><i class="fas fa-star"></i> 4.9 • Driver</div>
-                            </div>
-                        </div>
-                        <div class="lane-actions">
-                            <button class="btn btn-secondary btn-sm" onclick="openChat('Downtown Central')"><i class="fas fa-comment"></i> Chat</button>
-                            <button class="btn btn-primary btn-sm"><i class="fas fa-chair"></i> Request</button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Lane Card 2 -->
-                <div class="lane-card">
-                    <div class="lane-header">
-                        <div class="seat-indicator" style="--progress: 40%; --color: var(--warning);">
-                            <div class="seat-inner">
-                                <span class="seat-count">3</span>
-                                <span class="seat-label">Seats</span>
-                            </div>
-                        </div>
-                        <div class="lane-details">
-                            <div class="lane-title">Riverside Heights</div>
-                            <div class="lane-route">
-                                <i class="fas fa-bus"></i> Pine → River Rd → Bridge → Heights
-                            </div>
-                            <div class="lane-tags">
-                                <span class="tag tag-live tag-warning">● LIVE • DELAYED</span>
-                                <span class="tag tag-fare">$2.50</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="lane-footer">
-                        <div class="driver-info">
-                            <img src="https://i.pravatar.cc/150?img=32" class="driver-avatar">
-                            <div>
-                                <div class="driver-name">Aisha B.</div>
-                                <div class="driver-rating"><i class="fas fa-star"></i> 4.8 • Driver</div>
-                            </div>
-                        </div>
-                        <div class="lane-actions">
-                            <button class="btn btn-secondary btn-sm" onclick="openChat('Riverside Heights')"><i class="fas fa-comment"></i> Chat</button>
-                            <button class="btn btn-primary btn-sm"><i class="fas fa-chair"></i> Request</button>
-                        </div>
-                    </div>
-                </div>
+                <!-- Lane cards will be dynamically injected here by app.js -->
             </section>
 
             <!-- 2. HIVE VIEW (Community Feed) -->
@@ -151,68 +87,34 @@
                 <div class="post-card greeting-card">
                     <div class="flex justify-between align-center">
                         <div>
-                            <h3 class="greeting-title">Good evening, Vihaan 👋</h3>
+                            <h3 class="greeting-title" id="hive-greeting">Good evening, Rider 👋</h3>
                             <p class="text-sub mt-1">Here's what's happening in your community.</p>
-                            <span class="tag tag-live mt-2">Greenwood Heights</span>
+                            <span class="tag tag-live mt-2">Hyderabad</span>
                         </div>
                         <i class="fas fa-bus greeting-icon"></i>
                     </div>
                 </div>
 
                 <h3 class="section-subtitle">Local posts</h3>
-
-                <!-- Post 1 -->
-                <div class="post-card">
-                    <div class="post-header">
-                        <img src="https://i.pravatar.cc/150?img=33" class="driver-avatar avatar-lg">
-                        <div>
-                            <div class="post-user">Karan (Driver) <i class="fas fa-check-circle verified-badge"></i></div>
-                            <div class="post-time">2h ago • Route 12</div>
-                        </div>
-                    </div>
-                    <div class="post-content">Morning traffic was smoother today! 🚌 Thanks for the patience, team. Let's keep making our rides better.</div>
-                    <div class="post-image">
-                        <i class="fas fa-play-circle play-icon"></i>
-                    </div>
-                    <div class="post-actions">
-                        <div class="post-action"><i class="far fa-heart"></i> 24</div>
-                        <div class="post-action"><i class="far fa-comment"></i> 7</div>
-                        <div class="post-action"><i class="fas fa-share"></i> 3</div>
-                        <div class="post-action"><i class="far fa-bookmark"></i></div>
-                    </div>
-                </div>
+                <!-- Hive posts will be dynamically injected here by app.js -->
             </section>
 
             <!-- 3. MAP VIEW -->
             <section id="view-map" class="view-section p-0">
                 <div id="map-container">
-                    <!-- Placeholder for Leaflet/Google Maps -->
-                    <div class="map-placeholder">
-                        <div class="radar-pulse"></div>
-                        <div class="map-center-content">
-                            <i class="fas fa-map-marked-alt map-icon"></i>
-                            <p class="text-sub mt-2">Map Integration Area</p>
-                            <p class="text-xs text-darker">(Leaflet/Google Maps goes here)</p>
-                        </div>
-                        
-                        <!-- Simulated Proximity Nodes -->
-                        <div class="map-node" style="top: 30%; left: 30%;">
-                            <img src="https://i.pravatar.cc/150?img=5" class="node-avatar" style="border-color: var(--primary);">
-                            <p class="text-xs mt-1">12m • Looking</p>
-                        </div>
-                        <div class="map-node" style="top: 20%; right: 20%;">
-                            <img src="https://i.pravatar.cc/150?img=12" class="node-avatar" style="border-color: var(--warning);">
-                            <p class="text-xs mt-1">19m • Driving</p>
-                        </div>
-                    </div>
-
-                    <!-- SteerAgent Map Controls -->
+                    <!-- Leaflet Map renders here -->
+                    <div id="map" style="width: 100%; height: 100%; z-index: 1;"></div>
+                    
+                    <!-- SteerAgent Map Controls (Visible only to agents) -->
                     <div id="steer-agent-controls" class="map-overlay-controls hidden">
                         <button class="btn-primary btn-circle" onclick="openModal('report-modal')" title="Report Alert">
                             <i class="fas fa-exclamation-triangle"></i>
                         </button>
                         <button class="btn-secondary btn-circle" onclick="toggleGhostMode()" title="Ghost Mode">
                             <i class="fas fa-ghost"></i>
+                        </button>
+                        <button class="btn-primary btn-circle" onclick="mapModule.locateUser()" title="My Location">
+                            <i class="fas fa-crosshairs"></i>
                         </button>
                     </div>
                 </div>
@@ -221,13 +123,15 @@
             <!-- 4. PROFILE VIEW -->
             <section id="view-profile" class="view-section">
                 <div class="profile-header">
-                    <img src="https://i.pravatar.cc/150?img=11" class="profile-avatar">
-                    <h2 id="profile-name-display" class="profile-name">Sai Kumar</h2>
+                    <img src="https://i.pravatar.cc/150?img=11" class="profile-avatar" id="profile-avatar-img">
+                    <h2 id="profile-name-display" class="profile-name">Loading...</h2>
                     <p id="profile-role-display" class="profile-role">RearAgent</p>
+                    <!-- Edit Profile Button -->
+                    <button class="btn btn-secondary btn-sm mt-2" onclick="openEditProfile()"><i class="fas fa-edit"></i> Edit Profile</button>
                 </div>
 
                 <!-- SteerAgent Upgrade Section -->
-                <div id="become-steer-agent-section" class="post-card upgrade-card">
+                <div id="become-steer-agent-section" class="post-card upgrade-card hidden">
                     <h3 class="upgrade-title">Become a SteerAgent</h3>
                     <p class="text-sub mb-3">Verify your documents to unlock driving features, post lanes, and accept payments.</p>
                     <button class="btn btn-primary w-full" onclick="openModal('steer-agent-modal')">Apply Now</button>
@@ -256,7 +160,7 @@
                     </div>
                 </div>
 
-                <button class="btn btn-secondary w-full mt-4" onclick="logout()">Log Out</button>
+                <button class="btn btn-secondary w-full mt-4" onclick="handleLogout()">Log Out</button>
             </section>
         </main>
 
@@ -264,24 +168,28 @@
         <nav id="bottom-nav">
             <button onclick="switchTab('lanes')" class="active" id="nav-lanes"><i class="fas fa-bus"></i> Lanes</button>
             <button onclick="switchTab('hive')" id="nav-hive"><i class="fas fa-comments"></i> Hive</button>
+            
+            <!-- Floating Action Button (Context-Aware) -->
+            <button id="fab-create" class="fab" onclick="handleFABClick()">
+                <i class="fas fa-plus"></i>
+            </button>
+            
             <button onclick="switchTab('map')" id="nav-map"><i class="fas fa-map"></i> Map</button>
             <button onclick="switchTab('profile')" id="nav-profile"><i class="fas fa-user"></i> Profile</button>
         </nav>
 
-        <!-- CHAT OVERLAY (Hive) -->
+        <!-- CHAT OVERLAY -->
         <div id="hive-chat-view" class="hidden">
             <header class="chat-header">
                 <button onclick="closeChat()" class="icon-btn"><i class="fas fa-arrow-left"></i></button>
                 <h3 id="chat-room-title" class="chat-title">Hive Chat</h3>
             </header>
-            
+
             <!-- Messages Container (Oldest at top, Newest at bottom) -->
             <div id="chat-messages-container" class="chat-container">
                 <!-- Messages will be injected here by JS -->
-                <div class="chat-message received">Hello! Are you available for a ride?</div>
-                <div class="chat-message sent">Yes, I am 5 minutes away.</div>
             </div>
-            
+
             <!-- Chat Input -->
             <div class="chat-input-area">
                 <button id="request-payment-btn" class="btn-primary btn-circle btn-sm" title="Request UPI Payment">
@@ -339,13 +247,29 @@
                     <label>Confirm Password</label>
                     <input type="password" id="signup-confirm-password" class="form-input" required placeholder="Re-enter password">
                 </div>
-                <button type="submit" class="btn btn-primary w-full">Create RearAgent Account</button>
+                <button type="submit" class="btn btn-primary w-full" id="signup-submit-btn">Send OTP</button>
                 <p class="terms-text">By signing up, you agree to our Terms of Service.</p>
             </form>
         </div>
     </div>
 
-    <!-- 2. STEERAGENT APPLICATION MODAL -->
+    <!-- 2. OTP VERIFICATION MODAL -->
+    <div id="otp-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Verify Email</h2>
+                <button onclick="closeModal('otp-modal')" class="close-btn">&times;</button>
+            </div>
+            <p class="text-sub mb-3" id="otp-message">Enter the 6-digit code sent to your email.</p>
+            <div class="form-group">
+                <label>OTP Code</label>
+                <input type="text" id="otp-code" class="form-input" maxlength="6" placeholder="000000" style="text-align:center; font-size:24px; letter-spacing:8px;">
+            </div>
+            <button class="btn btn-primary w-full" onclick="verifyOTP()">Verify & Create Account</button>
+        </div>
+    </div>
+
+    <!-- 3. STEERAGENT APPLICATION MODAL -->
     <div id="steer-agent-modal" class="modal-overlay hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -361,7 +285,7 @@
                     <label>Vehicle Type</label>
                     <select id="sa-vehicle-type" class="form-input" required>
                         <option value="">Select...</option>
-                        <option value="bike">Bike</option>
+                        <option value="two-wheeler">Bike</option>
                         <option value="car">Car</option>
                         <option value="auto">Auto</option>
                     </select>
@@ -382,7 +306,7 @@
                     <label>Selfie with Vehicle</label>
                     <input type="file" id="sa-selfie" class="form-input" accept="image/*" required>
                 </div>
-                
+
                 <div class="agreement-box">
                     <strong>SteerAgent Agreement</strong>
                     <p>By checking this box, I confirm that all documents uploaded are authentic and belong to me. I agree to follow all traffic rules, maintain my vehicle responsibly, and treat all RearAgents with respect. I understand that any violation may lead to immediate termination of my SteerAgent account.</p>
@@ -391,13 +315,104 @@
                     <input type="checkbox" id="sa-agreement" required class="toggle-switch">
                     <label for="sa-agreement" class="ml-2 text-sm">I agree to the SteerAgent Agreement.</label>
                 </div>
-                
+
                 <button type="submit" class="btn btn-primary w-full mt-4">Submit Application</button>
             </form>
         </div>
     </div>
 
-    <!-- 3. ADMIN PANEL MODAL -->
+    <!-- 4. CREATE LANE MODAL (SteerAgent Only) -->
+    <div id="create-lane-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Create a Lane</h2>
+                <button onclick="closeModal('create-lane-modal')" class="close-btn">&times;</button>
+            </div>
+            <form id="create-lane-form">
+                <div class="form-group">
+                    <label>Route Title</label>
+                    <input type="text" id="lane-title" class="form-input" required placeholder="e.g., Hitech City to Gachibowli">
+                </div>
+                <div class="form-group">
+                    <label>Description / Stops</label>
+                    <textarea id="lane-description" class="form-input" rows="2" placeholder="e.g., Via Madhapur, Kondapur"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Total Seats</label>
+                    <input type="number" id="lane-seats" class="form-input" required min="1" max="50" value="4">
+                </div>
+                <div class="form-group">
+                    <label>Vehicle Type</label>
+                    <select id="lane-vehicle-type" class="form-input" required>
+                        <option value="car">Car</option>
+                        <option value="bike">Bike</option>
+                        <option value="auto">Auto</option>
+                        <option value="bus">Bus</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Vehicle Photo (Optional)</label>
+                    <input type="file" id="lane-photo" class="form-input" accept="image/*">
+                </div>
+                <button type="submit" class="btn btn-primary w-full mt-4">Post Lane</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 5. CREATE HIVE POST MODAL -->
+    <div id="create-hive-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Create a Post</h2>
+                <button onclick="closeModal('create-hive-modal')" class="close-btn">&times;</button>
+            </div>
+            <form id="create-hive-form">
+                <div class="form-group">
+                    <label>What's happening?</label>
+                    <textarea id="hive-text" class="form-input" rows="3" required placeholder="Share an update with the community..."></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>Attach Media</label>
+                    <div style="display:flex; gap:10px; margin-bottom:10px;">
+                        <label class="btn btn-secondary btn-sm" style="flex:1; text-align:center;">
+                            <i class="fas fa-image"></i> Photo <input type="file" id="hive-photo" accept="image/*" style="display:none;" onchange="document.getElementById('hive-embed-url').value=''">
+                        </label>
+                    </div>
+                    <input type="url" id="hive-embed-url" class="form-input" placeholder="Or paste YouTube/Instagram link here..." oninput="document.getElementById('hive-photo').value=''">
+                </div>
+                
+                <button type="submit" class="btn btn-primary w-full mt-4">Post to Hive</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 6. EDIT PROFILE MODAL -->
+    <div id="edit-profile-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Edit Profile</h2>
+                <button onclick="closeModal('edit-profile-modal')" class="close-btn">&times;</button>
+            </div>
+            <form id="edit-profile-form">
+                <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" id="edit-name" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label>UPI ID (For Payments)</label>
+                    <input type="text" id="edit-upi" class="form-input" placeholder="yourname@upi">
+                </div>
+                <div class="form-group">
+                    <label>Profile Photo</label>
+                    <input type="file" id="edit-avatar" class="form-input" accept="image/*">
+                </div>
+                <button type="submit" class="btn btn-primary w-full mt-4">Save Changes</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 7. ADMIN PANEL MODAL -->
     <div id="admin-modal" class="modal-overlay hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -412,7 +427,7 @@
         </div>
     </div>
 
-    <!-- 4. REPORT ALERT MODAL (SteerAgent Only) -->
+    <!-- 8. REPORT ALERT MODAL (SteerAgent Only) -->
     <div id="report-modal" class="modal-overlay hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -429,7 +444,7 @@
         </div>
     </div>
 
-    <!-- 5. SAVE LOCATION MODAL -->
+    <!-- 9. SAVE LOCATION MODAL -->
     <div id="location-modal" class="modal-overlay hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -445,8 +460,14 @@
     </div>
 
     <!-- ================= SCRIPTS ================= -->
-    <!-- Config Script -->
-        <!-- Main App Logic (Module) -->
+    
+    <!-- 1. Load Configuration FIRST (Sets window.STEERADAR) -->
+    <script src="config.js"></script>
+    
+    <!-- 2. Load Leaflet Map Library -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- 3. Load Main App Logic (Module) -->
     <script type="module" src="js/app.js"></script>
 </body>
 </html>
