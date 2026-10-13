@@ -1214,3 +1214,91 @@ a:focus-visible {
     .stories-container { max-width: 600px; margin-left: auto; margin-right: auto; }
     #trips-list { max-width: 600px; margin-left: auto; margin-right: auto; }
 }
+
+/* ============================================================
+   FIX 1: Constrain Logo Size
+   ============================================================ */
+.logo-text {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 160px;
+    overflow: hidden;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.brand-logo {
+    height: 40px !important;
+    width: auto !important;
+    max-width: 160px !important;
+    object-fit: contain !important;
+    filter: drop-shadow(0 0 8px rgba(0, 212, 160, 0.4));
+}
+
+.brand-fallback {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--primary);
+    align-items: center;
+    gap: 6px;
+    letter-spacing: -0.5px;
+    white-space: nowrap;
+}
+
+/* On very small screens, shrink further */
+@media (max-width: 380px) {
+    .brand-logo { height: 32px !important; max-width: 120px !important; }
+    .brand-fallback { font-size: 16px; }
+}
+
+/* ============================================================
+   FIX 2: Make the Map Full-Screen and Visible
+   ============================================================ */
+#view-map.view-section {
+    padding: 0 !important;
+    position: fixed !important;
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    z-index: 50;
+    background: var(--bg-dark);
+    animation: none;
+    display: none;
+}
+
+#view-map.view-section.active {
+    display: block !important;
+}
+
+#map-container {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden;
+}
+
+#map {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 400px;
+    background: var(--bg-dark);
+    z-index: 1;
+}
+
+/* Push map controls above bottom nav */
+.map-overlay-controls {
+    position: absolute;
+    bottom: calc(110px + var(--safe-bottom)) !important;
+    right: 20px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+#trip-controls {
+    bottom: calc(180px + var(--safe-bottom)) !important;
+}
