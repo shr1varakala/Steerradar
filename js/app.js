@@ -1,14 +1,14 @@
 /**
  * ============================================================================
- * STEERADAR FRONTEND CONTROLLER (v11.0)
+ * STEERADAR FRONTEND CONTROLLER (v12.0)
  * ============================================================================
  * Features:
- *  - Auth (OTP + password, email or phone login)
- *  - Lanes, Hive, Chat, Neighborhood Chat
- *  - Trips, Live presence, Ghost mode
- *  - Map: search, recenter, live location, agent markers with DM
+ *  - Light/Dark theme toggle (saved to localStorage)
+ *  - Auth (email or phone, OTP + password)
+ *  - Lanes, Hive, Chat, Neighborhood Chat, Trips
+ *  - Map with search, filter chips, recenter, live location, agent DM
  *  - Compressed + sequential + named image uploads
- *  - Admin panel, Logger, Long-press debug
+ *  - Admin panel, Logger with long-press debug
  * ============================================================================
  */
 
@@ -34,6 +34,7 @@ const state = {
     activeTab: 'lanes',
     currentRoom: null,
     lanes: [],
+    allLanes: [],
     hive: [],
     messages: {},
     savedPoints: [],
@@ -44,6 +45,7 @@ const state = {
     activeTrip: null,
     tripPoints: [],
     tripWatchId: null,
+    activeMapFilter: 'live',
     intervals: { poll: null, presence: null, chat: null },
     isLoading: { lanes: false, hive: false, chat: false },
     isOnline: navigator.onLine
@@ -62,15 +64,16 @@ const DOM = {
     profileAvatar: document.getElementById('profile-avatar-img'),
     becomeAgentSection: document.getElementById('become-steer-agent-section'),
     pendingAgentSection: document.getElementById('steer-agent-pending-section'),
-    steerAgentControls: document.getElementById('steer-agent-controls'),
-    tripControls: document.getElementById('trip-controls'),
-    tripBtn: document.getElementById('trip-btn'),
+    ctrlAlert: document.getElementById('ctrl-alert'),
+    ctrlGhost: document.getElementById('ctrl-ghost'),
+    ctrlTrip: document.getElementById('ctrl-trip'),
     chatView: document.getElementById('hive-chat-view'),
     chatMessages: document.getElementById('chat-messages-container'),
     chatInput: document.getElementById('chat-input'),
     chatTitle: document.getElementById('chat-room-title'),
     adminApplicationList: document.getElementById('admin-application-list'),
-    logoTrigger: document.getElementById('logo-trigger')
+    logoTrigger: document.getElementById('logo-trigger'),
+    themeToggle: document.getElementById('toggle-theme')
 };
 
 // ============================================================================
@@ -79,8 +82,11 @@ const DOM = {
 document.addEventListener('DOMContentLoaded', async () => {
     logger.init();
 
-    console.log('%c SteerRadar v11.0 booted ',
+    console.log('%c SteerRadar v12.0 booted ',
         'background:#00d4a0;color:#000;font-weight:800;padding:4px 10px;border-radius:4px;');
+
+    // Apply saved theme
+    applyTheme();
 
     setupEventListeners();
     setupNetworkHandlers();
@@ -90,6 +96,61 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await checkSession();
 });
+
+// ============================================================================
+// THEME MANAGEMENT
+// ============================================================================
+function applyTheme() {
+    let theme = 'light';
+    try {
+        theme = localStorage.getItem('steeradar-theme') || 'light';
+    } catch (e) {}
+    document.documentElement.setAttribute('data-theme', theme);
+    if (DOM.themeToggle) {
+        DOM.themeToggle.checked = theme === 'light';
+    }
+}
+
+window.handleThemeToggle = (input) => {
+    const theme = input.checked ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem('steeradar-theme', theme); } catch (e) {}
+    console.log('[theme]', theme);
+};
+
+// ============================================================================
+// MAP FILTER CHIPS
+// ============================================================================
+window.setMapFilter = (type, btn) => {
+    state.activeMapFilter = type;
+    document.querySelectorAll('.map-chip').forEach(c => c.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+
+    if (!state.allLanes.length) {
+        loadLanes();
+        return;
+    }
+
+    let filtered = [...state.allLanes];
+    if (type === 'seats') filtered = filtered.filter(l => l.seats > 0);
+    if (type === 'mine') filtered = filtered.filter(l => l.own);
+    if (type === 'live') filtered = filtered.filter(l => l.status === 'live' || !l.status);
+
+    state.lanes = filtered;
+
+    const container = getLanesContainer();
+    if (container) {
+        if (!filtered.length) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-bus"></i>
+                    <p>No lanes match this filter.</p>
+                </div>`;
+        } else {
+            container.innerHTML = filtered.map(createLaneCardHTML).join('');
+        }
+    }
+};
 
 // ============================================================================
 // 5. EVENT LISTENERS
@@ -111,7 +172,7 @@ function setupEventListeners() {
         if (e.key === 'Enter') sendMessage();
     });
 
-    DOM.tripBtn?.addEventListener('click', toggleTrip);
+    DOM.ctrlTrip?.addEventListener('click', toggleTrip);
 
     document.getElementById('lane-photo')?.addEventListener('change', (e) => previewImage(e, 'lane-photo-preview'));
     document.getElementById('hive-photo')?.addEventListener('change', (e) => previewImage(e, 'hive-photo-preview'));
@@ -366,11 +427,17 @@ function updateUIForRole() {
         state.user.role === 'agent' ? 'SteerAgent' : 'RearAgent';
     if (DOM.profileAvatar) DOM.profileAvatar.src = avatar;
 
+    // Admin button
     toggleVisibility(DOM.adminBtn, state.user.isAdmin);
-    toggleVisibility(DOM.steerAgentControls, state.user.role === 'agent');
-    toggleVisibility(DOM.tripControls, state.user.role === 'agent');
 
-    if (state.user.role === 'agent') {
+    // Map control buttons (alert / ghost / trip)
+    const isAgent = state.user.role === 'agent';
+    toggleVisibility(DOM.ctrlAlert, isAgent);
+    toggleVisibility(DOM.ctrlGhost, isAgent);
+    toggleVisibility(DOM.ctrlTrip, isAgent);
+
+    // Become agent section
+    if (isAgent) {
         toggleVisibility(DOM.becomeAgentSection, false);
         toggleVisibility(DOM.pendingAgentSection, false);
     } else if (state.user.agentStatus === 'pending') {
@@ -484,12 +551,19 @@ async function loadLanes(silent = false) {
     }
 
     const lanes = await api.listLanes();
-    state.lanes = lanes;
+    state.allLanes = lanes;
     state.isLoading.lanes = false;
+
+    // Apply active filter
+    let filtered = [...lanes];
+    if (state.activeMapFilter === 'seats') filtered = filtered.filter(l => l.seats > 0);
+    if (state.activeMapFilter === 'mine') filtered = filtered.filter(l => l.own);
+    if (state.activeMapFilter === 'live') filtered = filtered.filter(l => l.status === 'live' || !l.status);
+    state.lanes = filtered;
 
     if (!container) return;
 
-    if (!lanes.length) {
+    if (!filtered.length) {
         container.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-bus"></i>
@@ -501,7 +575,7 @@ async function loadLanes(silent = false) {
         return;
     }
 
-    container.innerHTML = lanes.map(createLaneCardHTML).join('');
+    container.innerHTML = filtered.map(createLaneCardHTML).join('');
 }
 
 function getLanesContainer() {
@@ -584,7 +658,7 @@ window.requestSeat = (laneId) => {
 };
 
 window.showLaneOnMap = async (laneId) => {
-    const lane = state.lanes.find(l => l.id === laneId);
+    const lane = state.allLanes.find(l => l.id === laneId);
     if (!lane) return showToast('Lane not found', 'error');
     if (!lane.lat || !lane.lng) return showToast('No location available', 'warning');
 
@@ -593,16 +667,16 @@ window.showLaneOnMap = async (laneId) => {
         mapModule.centerOn(lane.lat, lane.lng, 15);
         const popup = `
             <div style="text-align:center; padding:4px;">
-                <div style="font-weight:700; margin-bottom:6px; color:#00d4a0;">${escapeHTML(lane.title || 'Lane')}</div>
-                <div style="font-size:12px; color:#a0a0a0; margin-bottom:10px;">${escapeHTML(lane.ownerName || 'Driver')}</div>
+                <div style="font-weight:700; margin-bottom:6px; color:#00b88a;">${escapeHTML(lane.title || 'Lane')}</div>
+                <div style="font-size:11px; color:#6b7280; margin-bottom:8px;">${escapeHTML(lane.ownerName || 'Driver')}</div>
                 <button onclick="navigateToLane('${laneId}')" style="
-                    background:#00d4a0; color:#000; border:none; padding:8px 16px;
-                    border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px;
-                    margin-right:6px;
+                    background:#00b88a; color:#fff; border:none; padding:6px 12px;
+                    border-radius:6px; cursor:pointer; font-weight:bold; font-size:11px;
+                    margin-right:4px;
                 "><i class="fas fa-directions"></i> Navigate</button>
                 <button onclick="openChat('${laneId}', '${escapeHTML(lane.ownerName || 'Driver')}')" style="
-                    background:#1a1a1a; color:#fff; border:1px solid #2a2a2a; padding:8px 16px;
-                    border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px;
+                    background:#f3f4f6; color:#111; border:1px solid #e5e7eb; padding:6px 12px;
+                    border-radius:6px; cursor:pointer; font-weight:bold; font-size:11px;
                 "><i class="fas fa-comment"></i> Chat</button>
             </div>
         `;
@@ -611,7 +685,7 @@ window.showLaneOnMap = async (laneId) => {
 };
 
 window.navigateToLane = (laneId) => {
-    const lane = state.lanes.find(l => l.id === laneId);
+    const lane = state.allLanes.find(l => l.id === laneId);
     if (!lane) return;
     const fromLat = state.userLocation?.lat || null;
     const fromLng = state.userLocation?.lng || null;
@@ -671,14 +745,14 @@ function createHivePostHTML(post) {
     } else if (post.mediaType === 'youtube' && post.mediaUrl) {
         const vid = extractYouTubeId(post.mediaUrl);
         if (vid) {
-            mediaHTML = `<div style="margin-bottom:12px; border-radius:12px; overflow:hidden;">
-                <iframe width="100%" height="200"
+            mediaHTML = `<div style="margin-bottom:10px; border-radius:12px; overflow:hidden;">
+                <iframe width="100%" height="190"
                     src="https://www.youtube.com/embed/${vid}"
                     frameborder="0" allowfullscreen loading="lazy"></iframe>
             </div>`;
         }
     } else if (post.mediaType === 'instagram' && post.mediaUrl) {
-        mediaHTML = `<div style="margin-bottom:12px;">
+        mediaHTML = `<div style="margin-bottom:10px;">
             <blockquote class="instagram-media"
                 data-instgrm-permalink="${post.mediaUrl}"
                 data-instgrm-version="14"
@@ -1178,18 +1252,15 @@ function initMap() {
         );
     }
 
-    // Listen for "savePin" events from search results
     window.addEventListener('savePin', (e) => {
         state.pendingLocation = e.detail;
         openModal('location-modal');
     });
 
-    // Auto-update user location when watched
     window.addEventListener('userLocationUpdate', (e) => {
         state.userLocation = e.detail;
     });
 
-    // Start live location
     mapModule.startLiveLocation();
 }
 
@@ -1199,24 +1270,24 @@ function handleMapClick(lat, lng) {
     state.pendingLocation = { lat, lng };
 
     const distanceText = state.userLocation
-        ? `<p style="margin:5px 0; font-size:11px; color:#00d4a0;">${mapModule.formatDistance(mapModule.calculateDistance(state.userLocation.lat, state.userLocation.lng, lat, lng))} away</p>`
+        ? `<p style="margin:4px 0; font-size:11px; color:#00b88a;">${mapModule.formatDistance(mapModule.calculateDistance(state.userLocation.lat, state.userLocation.lng, lat, lng))} away</p>`
         : '';
 
     mapModule.dropMarker(lat, lng, `
-        <div style="text-align:center; font-family:sans-serif; padding: 6px;">
-            <p style="margin:5px 0; font-size:12px; color:#a0a0a0;">
+        <div style="text-align:center; padding:4px;">
+            <p style="margin:4px 0; font-size:11px; color:#6b7280;">
                 ${lat.toFixed(4)}, ${lng.toFixed(4)}
             </p>
             ${distanceText}
             <button onclick="openModal('location-modal')"
-                style="background:#00d4a0; color:#000; border:none; padding:8px 16px;
-                border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px; margin-top:4px;">
-                <i class="fas fa-bookmark"></i> Save Location
+                style="background:#00b88a; color:#fff; border:none; padding:6px 12px;
+                border-radius:6px; cursor:pointer; font-weight:bold; font-size:11px; margin-top:4px;">
+                <i class="fas fa-bookmark"></i> Save
             </button>
             <button onclick="navigateToPoint(${lat},${lng})"
-                style="background:#1a1a1a; color:#fff; border:1px solid #2a2a2a; padding:8px 16px;
-                border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px; margin-top:4px;">
-                <i class="fas fa-directions"></i> Navigate
+                style="background:#f3f4f6; color:#111; border:1px solid #e5e7eb; padding:6px 12px;
+                border-radius:6px; cursor:pointer; font-weight:bold; font-size:11px; margin-top:4px;">
+                <i class="fas fa-directions"></i> Go
             </button>
         </div>
     `);
@@ -1342,7 +1413,7 @@ window.toggleTrip = async () => {
         return showToast('Only SteerAgents can start trips', 'warning');
     }
 
-    const btn = DOM.tripBtn;
+    const btn = DOM.ctrlTrip;
 
     if (state.activeTrip) {
         setButtonLoading(btn, '');
@@ -1474,7 +1545,7 @@ function previewImage(event, previewId) {
     if (!preview) {
         preview = document.createElement('img');
         preview.id = previewId;
-        preview.style.cssText = 'width:100%; max-height:160px; object-fit:cover; border-radius:12px; margin-top:10px;';
+        preview.style.cssText = 'width:100%; max-height:140px; object-fit:cover; border-radius:12px; margin-top:8px;';
         event.target.parentElement.appendChild(preview);
     }
 
@@ -1524,11 +1595,6 @@ function fileToBase64(file) {
     });
 }
 
-/**
- * Compress an image client-side before upload.
- * Resizes to max 800px on the longest side, JPEG at 70% quality.
- * Reduces a 4MB phone photo to ~150KB.
- */
 function compressImage(file, maxDim = 800, quality = 0.7) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -1556,7 +1622,6 @@ function compressImage(file, maxDim = 800, quality = 0.7) {
     });
 }
 
-/** Sanitize a string for use in a filename */
 function sanitizeFilename(s, max = 20) {
     return String(s || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, max) || 'file';
 }
