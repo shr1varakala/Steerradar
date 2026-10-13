@@ -1,16 +1,6 @@
 /**
  * ============================================================================
- * STEERADAR FRONTEND CONTROLLER (v9.0)
- * ============================================================================
- * Complete client for the SteerRadar community ride network.
- * 
- * MODULES:
- * - Auth (OTP + Password)                - Role-Based UI (Rear/Steer/Admin)
- * - Lanes (Live routes)                  - Hive (Feed with media embeds)
- * - Chat (Global + Neighborhood)         - Map (Leaflet + presence)
- * - Trips (Route + History)              - Alerts & Reports
- * - Ghost Mode                           - PWA Install Prompt
- * - Notifications (Toast system)         - Network resilience
+ * STEERADAR FRONTEND CONTROLLER (v9.1) - Email + Phone Login
  * ============================================================================
  */
 
@@ -21,48 +11,33 @@ import { mapModule } from './map.js';
 // 1. CONFIGURATION
 // ============================================================================
 const CONFIG = window.STEERADAR || {};
-const POLL_INTERVAL = 20000;       // Lanes/Hive refresh (20s)
-const PRESENCE_INTERVAL = 20000;   // GPS broadcast (20s)
-const CHAT_POLL_INTERVAL = 5000;   // Chat refresh (5s)
+const POLL_INTERVAL = 20000;
+const PRESENCE_INTERVAL = 20000;
+const CHAT_POLL_INTERVAL = 5000;
 const TOAST_DURATION = CONFIG.TOAST_DURATION_MS || 2400;
 
 // ============================================================================
-// 2. APPLICATION STATE
+// 2. STATE
 // ============================================================================
 const state = {
-    // Session
     user: null,
     session: null,
-    
-    // Navigation
     activeTab: 'lanes',
     currentRoom: null,
-    
-    // Data
     lanes: [],
     hive: [],
     messages: {},
     savedPoints: [],
     activeVehicles: [],
-    
-    // Signup flow
     signupData: null,
-    
-    // Map & Location
     pendingLocation: null,
     userLocation: null,
     activeTrip: null,
     tripPolyline: null,
     tripPoints: [],
     tripWatchId: null,
-    
-    // Intervals
     intervals: { poll: null, presence: null, chat: null },
-    
-    // Loading flags
     isLoading: { lanes: false, hive: false, chat: false },
-    
-    // Network
     isOnline: navigator.onLine
 };
 
@@ -93,7 +68,7 @@ const DOM = {
 // 4. INITIALIZATION
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('%c SteerRadar v9.0 booted ', 
+    console.log('%c SteerRadar v9.1 booted ', 
         'background:#00d4a0;color:#000;font-weight:800;padding:4px 10px;border-radius:4px;');
     
     setupEventListeners();
@@ -109,38 +84,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 // 5. EVENT LISTENERS
 // ============================================================================
 function setupEventListeners() {
-    // Auth
     document.getElementById('signin-form')?.addEventListener('submit', handleSignIn);
     document.getElementById('signup-form')?.addEventListener('submit', handleSignupStep1);
     document.getElementById('otp-code')?.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') verifyOTP();
     });
     
-    // SteerAgent Application
     document.getElementById('steer-agent-form')?.addEventListener('submit', handleSteerAgentApplication);
-    
-    // Content Creation
     document.getElementById('create-lane-form')?.addEventListener('submit', handleCreateLane);
     document.getElementById('create-hive-form')?.addEventListener('submit', handleCreateHivePost);
     document.getElementById('edit-profile-form')?.addEventListener('submit', handleEditProfile);
-    
-    // Settings
     document.getElementById('toggle-ghost-mode')?.addEventListener('change', handleGhostModeToggle);
     
-    // Chat
     DOM.chatInput?.addEventListener('keypress', (e) => { 
         if (e.key === 'Enter') sendMessage(); 
     });
     
-    // Trip
     DOM.tripBtn?.addEventListener('click', toggleTrip);
     
-    // Image previews
     document.getElementById('lane-photo')?.addEventListener('change', (e) => previewImage(e, 'lane-photo-preview'));
     document.getElementById('hive-photo')?.addEventListener('change', (e) => previewImage(e, 'hive-photo-preview'));
     document.getElementById('edit-avatar')?.addEventListener('change', (e) => previewImage(e, 'edit-avatar-preview'));
     
-    // Close modals on overlay click
     document.querySelectorAll('.modal-overlay').forEach(overlay => {
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay) overlay.classList.add('hidden');
@@ -193,20 +158,41 @@ async function checkSession() {
     }
 }
 
+// ====== UPDATED: handleSignIn accepts email OR phone ======
 async function handleSignIn(e) {
     e.preventDefault();
-    const phone = document.getElementById('signin-identity').value.trim();
+    const identity = document.getElementById('signin-identity').value.trim();
     const password = document.getElementById('signin-password').value;
-    if (!phone || !password) return showToast('Please fill in all fields', 'warning');
-    
+
+    if (!identity || !password) return showToast('Please fill in all fields', 'warning');
+
+    // Smart validation: email OR phone
+    const isEmail = identity.includes('@');
+    if (isEmail) {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identity)) {
+            return showToast('Enter a valid email address', 'error');
+        }
+    } else {
+        const cleanPhone = identity.replace(/\D/g, '');
+        if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+            return showToast('Enter a valid 10-digit mobile number starting with 6-9', 'error');
+        }
+    }
+
     const btn = e.target.querySelector('button[type="submit"]');
     setButtonLoading(btn, 'Signing in...');
-    
-    const res = await api.login({ phone, password });
+
+    // Backend accepts 'phone' field for both phone/email identity
+    const res = await api.login({ phone: identity, password });
     resetButton(btn, 'Sign In');
-    
+
     if (res && res.token) {
-        api.setSession(res);
+        // CRITICAL: Save the real phone number from backend to localStorage
+        api.setSession({
+            token: res.token,
+            phone: res.user.phone,
+            user: res.user
+        });
         state.user = res.user;
         closeModal('auth-modal');
         updateUIForRole();
@@ -269,7 +255,11 @@ window.verifyOTP = async () => {
     resetButton(btn, 'Verify & Create Account');
     
     if (regRes && regRes.token) {
-        api.setSession(regRes);
+        api.setSession({
+            token: regRes.token,
+            phone: regRes.user.phone,
+            user: regRes.user
+        });
         state.user = regRes.user;
         state.signupData = null;
         closeModal('otp-modal');
@@ -619,7 +609,7 @@ window.toggleLike = async (postId, currentLikes) => {
 };
 
 // ============================================================================
-// 14. CHAT (Global + Neighborhood)
+// 14. CHAT
 // ============================================================================
 window.openChat = async (roomId, name) => {
     state.currentRoom = roomId;
@@ -714,7 +704,7 @@ window.openNeighborhoodChat = async () => {
 };
 
 // ============================================================================
-// 15. FAB (Context-Aware)
+// 15. FAB
 // ============================================================================
 window.handleFABClick = () => {
     if (!state.user) return showToast('Please sign in first', 'error');
@@ -1081,7 +1071,7 @@ async function broadcastPresence() {
 }
 
 // ============================================================================
-// 23. ALERTS & REPORTS
+// 23. ALERTS
 // ============================================================================
 window.reportAlert = async (type) => {
     if (!state.user) return showToast('Sign in first', 'error');
