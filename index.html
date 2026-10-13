@@ -127,29 +127,63 @@
             </section>
 
             <!-- 3. MAP VIEW -->
-            <section id="view-map" class="view-section">
-                <div id="map-container">
-                    <div id="map"></div>
-                    
-                    <div id="steer-agent-controls" class="map-overlay-controls hidden">
-                        <button class="btn-primary btn-circle" onclick="openModal('report-modal')" title="Report Alert">
-                            <i class="fas fa-exclamation-triangle"></i>
-                        </button>
-                        <button class="btn-secondary btn-circle" onclick="toggleGhostMode()" title="Ghost Mode">
-                            <i class="fas fa-ghost"></i>
-                        </button>
-                        <button class="btn-primary btn-circle" onclick="mapModule.locateUser()" title="My Location">
-                            <i class="fas fa-crosshairs"></i>
-                        </button>
-                    </div>
+<section id="view-map" class="view-section">
+    <div id="map-container">
+        <div id="map"></div>
 
-                    <div id="trip-controls" class="map-overlay-controls hidden">
-                        <button id="trip-btn" class="btn-primary btn-circle" onclick="toggleTrip()" title="Start/End Trip">
-                            <i class="fas fa-play"></i>
-                        </button>
-                    </div>
-                </div>
-            </section>
+        <!-- SEARCH BAR -->
+        <div class="map-search-bar">
+            <i class="fas fa-search"></i>
+            <input type="text" id="map-search-input" placeholder="Search places, area, landmark..." autocomplete="off">
+            <button id="map-search-clear" class="map-search-clear hidden" onclick="mapModule.clearSearch()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <!-- SEARCH RESULTS DROPDOWN -->
+        <div id="map-search-results" class="map-search-results hidden"></div>
+
+        <!-- COMPASS / RECENTER BUTTON -->
+        <button class="map-compass" onclick="mapModule.recenter()" title="Recenter to my location">
+            <i class="fas fa-location-arrow"></i>
+        </button>
+
+        <!-- MY LOCATION BUTTON -->
+        <button class="map-my-location" onclick="mapModule.locateUser(true)" title="My live location">
+            <i class="fas fa-crosshairs"></i>
+        </button>
+
+        <!-- ACTIVE TRIP BANNER (visible when navigating to a pickup) -->
+        <div id="map-trip-banner" class="map-trip-banner hidden">
+            <div class="trip-banner-info">
+                <div class="trip-banner-title" id="trip-banner-title">Heading to pickup</div>
+                <div class="trip-banner-sub" id="trip-banner-sub">-- km away</div>
+            </div>
+            <button class="btn btn-danger btn-sm" onclick="mapModule.cancelRoute()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <!-- SteerAgent Map Controls (visible only to agents) -->
+        <div id="steer-agent-controls" class="map-overlay-controls hidden">
+            <button class="btn-primary btn-circle" onclick="openModal('report-modal')" title="Report Alert">
+                <i class="fas fa-exclamation-triangle"></i>
+            </button>
+            <button class="btn-secondary btn-circle" onclick="toggleGhostMode()" title="Ghost Mode">
+                <i class="fas fa-ghost"></i>
+            </button>
+        </div>
+
+        <!-- Trip Controls (SteerAgent Only) -->
+        <div id="trip-controls" class="map-overlay-controls hidden">
+            <button id="trip-btn" class="btn-primary btn-circle" onclick="toggleTrip()" title="Start/End Trip">
+                <i class="fas fa-play"></i>
+            </button>
+        </div>
+    </div>
+</section>
+            
+                        
 
             <!-- 4. PROFILE VIEW -->
             <section id="view-profile" class="view-section">
