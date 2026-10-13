@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steerardar-logo.png" alt="Steeradar" width="140" height="140" />
+<img src="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steeradar-logo.png" alt="Steeradar" width="140" height="140" />
 
 ### Live community rides. Peer chat. Local mesh. Universal DB.
 
