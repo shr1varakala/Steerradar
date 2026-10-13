@@ -22,6 +22,9 @@
     <!-- Leaflet Map CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     
+    <!-- MapLibre GL (for keyless vector dark map) -->
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.css">
+    
     <!-- Main Stylesheet -->
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -529,10 +532,21 @@
     </div>
 
     <!-- ================= SCRIPTS ================= -->
+
+    <!-- 1. Load Configuration FIRST (sets window.STEERADAR) -->
     <script src="config.js"></script>
+
+    <!-- 2. Leaflet (for map base + markers + polylines) -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- 3. MapLibre GL + Leaflet plugin (for keyless dark vector tiles) -->
+    <script src="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.19/leaflet-maplibre-gl.js"></script>
+
+    <!-- 4. Main App Logic (Module) -->
     <script type="module" src="js/app.js"></script>
 
+    <!-- 5. Register Service Worker (PWA) -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
