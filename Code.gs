@@ -1,9 +1,10 @@
 /**
- * Steeradar backend — v8.4
- * FIXED: CORS headers, photo URL handling, Hive media support, sheet auto-migration.
+ * Steeradar backend — v8.5
+ * Aligned with frontend v10.0
+ * Fixes: lane title/description handling, trip distance, map features
  */
 
-const VERSION = '8.4';
+const VERSION = '8.5';
 const APP_NAME = 'Steeradar';
 const APP_URL = 'https://suryasticsai.github.io/Steeradar/';
 const LOGO_URL = 'https://raw.githubusercontent.com/suryasticsai/Steeradar/main/steerardar-logo.png';
@@ -32,7 +33,7 @@ const PHOTO_SLOTS = ['avatar', 'vehiclePhoto', 'platePhoto', 'upiQr', 'selfie', 
 const SCHEMA = {
   users:        ['phone','email','name','username','vehicle','vehicleType',
                  'avatarId','vehiclePhotoId','platePhotoId','upiQrId',
-                 'community','role','status','agentStatus',
+                 'community','role','status','agentStatus','ghostMode',
                  'laneCount','tripCount','ratingSum','ratingCount',
                  'passHash','salt',
                  'createdAt','lastLogin','device'],
@@ -41,9 +42,10 @@ const SCHEMA = {
   otps:         ['id','phone','email','purpose','codeHash','createdAt',
                  'expiresAt','attempts','verifiedAt','consumed'],
   applications: ['id','phone','name','vehicle','vehicleType','vehiclePhotoId',
-                 'platePhotoId','selfieId','upiId','agreement','status','notes',
+                 'platePhotoId','selfieId','licenseId','upiId','agreement','status','notes',
                  'appliedAt','reviewedAt','reviewedBy'],
   lanes:        ['id','ownerPhone','driver','vehicle','vehicleType','community',
+                 'title','description','photoUrl',
                  'from','via','to','total','taken','fare','lat','lng',
                  'status','ts','peerId','lastSeen','showPlate'],
   hive:         ['id','ownerPhone','name','avatar','community',
@@ -55,7 +57,7 @@ const SCHEMA = {
   presence:     ['vehicle','phone','name','avatar','peerId','vehicleType',
                  'lat','lng','lastSeen'],
   trips:        ['id','phone','laneId','driverPhone','startTs','endTs',
-                 'distance','fare','status','notes'],
+                 'startLat','startLng','endLat','endLng','distance','fare','status','notes'],
   ratings:      ['id','tripId','fromPhone','toPhone','stars','comment','ts'],
   reports:      ['id','reporterPhone','targetPhone','targetVehicle',
                  'reason','detail','status','ts','resolvedAt'],
@@ -97,10 +99,6 @@ function isEmail(v) { return /^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$/.test(Str
 function isVehicle(v) { return /^[A-Z0-9]{4,15}$/.test(String(v || '')); }
 function normVehicle(v) { return String(v || '').replace(/[\s-]/g, '').toUpperCase(); }
 
-/**
- * Extract a Google Drive fileId from various URL formats.
- * Accepts: /thumbnail?id=X, /uc?id=X, /file/d/X/view, or a raw fileId.
- */
 function extractDriveId(url) {
   const s = String(url || '').trim();
   if (!s) return '';
@@ -214,9 +212,6 @@ function getSheet(name) {
   return sh;
 }
 
-/**
- * Append any missing columns from SCHEMA to an existing sheet.
- */
 function migrateSheet(name) {
   const sh = getSheet(name);
   const cols = SCHEMA[name];
@@ -746,6 +741,7 @@ H.register = function (b) {
     avatarId: '', vehiclePhotoId: '', platePhotoId: '', upiQrId: '',
     community: clean(b.community, 40),
     role: 'user', status: 'active', agentStatus: '',
+    ghostMode: 'false',
     laneCount: 0, tripCount: 0, ratingSum: 0, ratingCount: 0,
     passHash: passHash, salt: salt,
     createdAt: t, lastLogin: t, device: clean(b.device, 100)
@@ -762,10 +758,6 @@ H.register = function (b) {
   return { ok: true, token: token, phone: phone, user: publicSelf(findUser(phone)) };
 };
 
-/**
- * LOGIN — accepts identity (phone OR email) + password OR OTP.
- * Frontend sends { phone: identity, password } or { phone: identity, code }.
- */
 H.login = function (b) {
   const identity = String(b.phone || '').trim();
   if (!identity) throw new ApiError('bad_identity', 'Enter phone or email');
@@ -836,9 +828,6 @@ H.checkSession = function (b, u) {
 
 H.getMe = function (b, u) { return publicSelf(u); };
 
-/**
- * updateMe — accepts both `photo` (URL) and `avatarId` (fileId).
- */
 H.updateMe = function (b, u) {
   const patch = {};
   const r = b.patch || b;
@@ -867,16 +856,12 @@ H.updateMe = function (b, u) {
     patch.vehicleType = r.vehicleType;
   }
 
-  // Accept upiId, upiQrId, city, bio
   if (r.upiId !== undefined) patch.upiQrId = clean(r.upiId, 100);
   if (r.upiQrId !== undefined) patch.upiQrId = clean(r.upiQrId, 100);
   if (r.city !== undefined) patch.community = clean(r.city, 60);
   if (r.community !== undefined) patch.community = clean(r.community, 60);
-
-  // Ghost mode
   if (r.ghostMode !== undefined) patch.ghostMode = r.ghostMode ? 'true' : 'false';
 
-  // Accept `photo` as a URL — extract fileId
   if (r.photo !== undefined) {
     const url = String(r.photo || '');
     if (url === '') {
@@ -887,7 +872,6 @@ H.updateMe = function (b, u) {
     }
   }
 
-  // Accept direct fileId fields
   const slots = ['avatarId', 'vehiclePhotoId', 'platePhotoId', 'upiQrId'];
   for (let i = 0; i < slots.length; i++) {
     const k = slots[i];
@@ -903,9 +887,6 @@ H.updateMe = function (b, u) {
 };
 
 // ─── SteerAgent flow ───
-/**
- * becomeAgent — accepts photo URLs OR fileIds.
- */
 H.becomeAgent = function (b, u) {
   if (u.role === 'agent' && u.agentStatus === 'active') {
     return { ok: true, user: publicSelf(u), already: true };
@@ -919,7 +900,6 @@ H.becomeAgent = function (b, u) {
   const vehicleType = VEHICLE_TYPES.indexOf(b.vehicleType) !== -1 ? b.vehicleType : (u.vehicleType || 'car');
   const upiId = clean(b.upiId, 100);
 
-  // Accept URLs OR fileIds for photos
   const tag = ownerTag(u.phone);
 
   function resolvePhoto(v) {
@@ -936,7 +916,6 @@ H.becomeAgent = function (b, u) {
   const selfieId = resolvePhoto(b.selfieId || b.selfie || b.photo);
   const licenseId = resolvePhoto(b.licenseId || b.license);
 
-  // Check for existing pending application
   const apps = readAll('applications');
   for (let i = 0; i < apps.length; i++) {
     if (apps[i].phone === u.phone && apps[i].status === 'pending') {
@@ -949,7 +928,7 @@ H.becomeAgent = function (b, u) {
     id: shortId('app'), phone: u.phone, name: u.name,
     vehicle: vehicle, vehicleType: vehicleType,
     vehiclePhotoId: vehiclePhotoId, platePhotoId: platePhotoId,
-    selfieId: selfieId, upiId: upiId, agreement: 'accepted',
+    selfieId: selfieId, licenseId: licenseId, upiId: upiId, agreement: 'accepted',
     status: 'pending', notes: '',
     appliedAt: appliedAt, reviewedAt: '', reviewedBy: ''
   });
@@ -972,7 +951,7 @@ H.adminPendingAgents = function (b, u) {
       uid: a.phone, phone: a.phone, name: a.name,
       vehicle: a.vehicle, vehicleType: a.vehicleType,
       vehiclePhotoId: a.vehiclePhotoId, platePhotoId: a.platePhotoId,
-      selfieId: a.selfieId, upiId: a.upiId,
+      selfieId: a.selfieId, licenseId: a.licenseId, upiId: a.upiId,
       city: '', appliedAt: Number(a.appliedAt)
     };
   });
@@ -1023,39 +1002,64 @@ H.adminRejectAgent = function (b, u) {
 };
 
 // ─── Lanes ───
+/**
+ * publicLane — v8.5 uses the direct title/description fields if present,
+ * otherwise falls back to from/to composition for backward compat.
+ */
 function publicLane(l, me) {
   const own = !!me && l.ownerPhone === me.phone;
+
+  const title = l.title ||
+    ((l.from ? l.from + ' → ' : '') + l.to) ||
+    'Untitled Route';
+  const description = l.description || l.via || '';
+
   return {
-    id: l.id, driver: l.driver, ownerName: l.driver,
-    vehicle: l.vehicle, vehicleType: l.vehicleType,
-    from: l.from, via: l.via, to: l.to,
-    title: (l.from ? l.from + ' → ' : '') + l.to,
-    description: l.via || '',
+    id: l.id,
+    driver: l.driver,
+    ownerName: l.driver,
+    vehicle: l.vehicle,
+    vehicleType: l.vehicleType,
+    title: title,
+    description: description,
+    photo: l.photoUrl || '',
+    from: l.from,
+    via: l.via,
+    to: l.to,
     total: Number(l.total),
     seats: Math.max(0, Number(l.total) - Number(l.taken)),
     taken: Number(l.taken),
     fare: Number(l.fare),
     lat: own ? round(l.lat, 7) : round(l.lat, 3),
     lng: own ? round(l.lng, 7) : round(l.lng, 3),
-    status: l.status, ts: Number(l.ts),
+    status: l.status,
+    ts: Number(l.ts),
     createdAt: new Date(Number(l.ts)).toISOString(),
-    peerId: l.peerId, lastSeen: Number(l.lastSeen),
-    showPlate: l.showPlate || 'true', own: own
+    peerId: l.peerId,
+    lastSeen: Number(l.lastSeen),
+    showPlate: l.showPlate || 'true',
+    own: own
   };
 }
 
 function laneFields(row, user, existing) {
-  const total = Math.round(toNum(row.total, 1, 60, existing ? Number(existing.total) : 4));
-  const taken = Math.round(toNum(row.taken, 0, total, 0));
+  const total = Math.round(toNum(row.total || row.seats, 1, 60, existing ? Number(existing.total) : 4));
+  const taken = Math.round(toNum(row.taken, 0, total, existing ? Number(existing.taken) : 0));
   return {
-    driver: user.name, vehicle: user.vehicle,
+    driver: user.name,
+    vehicle: user.vehicle,
     vehicleType: VEHICLE_TYPES.indexOf(row.vehicleType) !== -1 ? row.vehicleType : (user.vehicleType || 'car'),
-    from: clean(row.from || row.title, 80),
-    via: clean(row.via || row.description, 200),
+    title: clean(row.title, 120),
+    description: clean(row.description, 300),
+    photoUrl: clean(row.photo, 500),
+    from: clean(row.from, 80),
+    via: clean(row.via, 200),
     to: clean(row.to, 80),
-    total: total, taken: taken,
+    total: total,
+    taken: taken,
     fare: Math.round(toNum(row.fare, 0, 10000, 0)),
-    lat: coord(row.lat, 90), lng: coord(row.lng, 180),
+    lat: coord(row.lat, 90),
+    lng: coord(row.lng, 180),
     status: row.status === 'full' ? 'full' : 'live',
     peerId: /^steeradar-veh-[A-Z0-9-]{4,24}$/.test(String(row.peerId || '')) ? row.peerId : '',
     lastSeen: now(),
@@ -1090,7 +1094,7 @@ H.insertLane = function (b, u) {
   Object.keys(f).forEach(function (k) { obj[k] = f[k]; });
   appendRow('lanes', obj);
 
-  logAudit(u.phone, 'insertLane', f.to);
+  logAudit(u.phone, 'insertLane', f.title || f.to);
   return publicLane(Object.assign({ id: row.id, ownerPhone: u.phone }, f), u);
 };
 
@@ -1108,7 +1112,8 @@ function ownLane(id, u) {
 H.updateLane = function (b, u) {
   const l = ownLane(b.id, u);
   if (!l) throw new ApiError('not_found');
-  updateRow('lanes', l._row, laneFields(b.row || b, u, l));
+  const patch = laneFields(b.row || b, u, l);
+  updateRow('lanes', l._row, patch);
   return { ok: true };
 };
 
@@ -1146,9 +1151,6 @@ H.listHive = function (b, u) {
   return posts.slice(0, 200).map(function (p) { return publicPost(p, u); });
 };
 
-/**
- * insertHive — accepts text, photo (URL), mediaUrl, mediaType.
- */
 H.insertHive = function (b, u) {
   const r = b.row || b;
   if (!isId(r.id)) r.id = shortId('H');
@@ -1380,9 +1382,12 @@ H.startTrip = function (b, u) {
     id: id, phone: u.phone,
     laneId: isId(d.laneId) ? d.laneId : '',
     driverPhone: isPhone(d.driverPhone) ? d.driverPhone : '',
-    startTs: now(), endTs: '', distance: '', fare: '',
+    startTs: now(), endTs: '',
+    startLat: coord(d.startLat, 90), startLng: coord(d.startLng, 180),
+    endLat: '', endLng: '',
+    distance: '', fare: '',
     status: 'active',
-    notes: clean(d.startLat, 20) + ',' + clean(d.startLng, 20)
+    notes: ''
   });
   return { id: id, ok: true };
 };
@@ -1402,8 +1407,13 @@ H.endTrip = function (b, u) {
   const distance = toNum(b.distanceKm || b.distance, 0, 5000000, 0);
 
   updateRow('trips', trip._row, {
-    endTs: now(), distance: distance, fare: fare,
-    status: 'completed', notes: clean(b.notes, 500)
+    endTs: now(),
+    endLat: coord(b.endLat, 90),
+    endLng: coord(b.endLng, 180),
+    distance: distance,
+    fare: fare,
+    status: 'completed',
+    notes: clean(b.notes, 500)
   });
 
   return { ok: true };
@@ -1417,7 +1427,8 @@ H.myTrips = function (b, u) {
       id: t.id, status: t.status,
       startedAt: t.startTs ? new Date(Number(t.startTs)).toISOString() : '',
       endedAt: t.endTs ? new Date(Number(t.endTs)).toISOString() : '',
-      distanceKm: t.distance || '', fare: t.fare || '',
+      distanceKm: t.distance || '',
+      fare: t.fare || '',
       createdAt: t.startTs ? new Date(Number(t.startTs)).toISOString() : ''
     };
   });
@@ -1532,6 +1543,28 @@ H.deleteImage = function (b, u) {
   return { ok: true };
 };
 
+// ─── Reports ───
+H.reportUser = function (b, u) {
+  rateLimit(['report:' + u.phone], 5, 3600);
+  const targetVehicle = normVehicle(b.vehicle);
+  const reason = clean(b.reason, 60);
+  const detail = clean(b.detail, 500);
+  if (!reason) throw new ApiError('bad_reason');
+
+  const target = findUserByVehicle(targetVehicle);
+  appendRow('reports', {
+    id: shortId('rep'),
+    reporterPhone: u.phone,
+    targetPhone: target ? target.phone : '',
+    targetVehicle: targetVehicle,
+    reason: reason, detail: detail,
+    status: 'open', ts: now(), resolvedAt: ''
+  });
+
+  try { sendReportAckEmail(u.email); } catch (e) {}
+  return { ok: true };
+};
+
 // ═══════════════════════════════════════════════════
 //  ROUTER
 // ═══════════════════════════════════════════════════
@@ -1573,6 +1606,7 @@ const ROUTES = {
   adminPendingAgents: { auth: 'required' },
   adminApproveAgent:  { auth: 'required', write: true },
   adminRejectAgent:   { auth: 'required', write: true },
+  reportUser:         { auth: 'required', write: true },
   debug:              { auth: 'required' }
 };
 
@@ -1650,7 +1684,6 @@ function setup() {
   Logger.log('============================================');
   Logger.log('Sheet URL: ' + getSS().getUrl());
   Logger.log('Mail quota: ' + safeQuota());
-  Logger.log('Set ADMIN_PHONES in Script Properties');
   Logger.log('Now: Deploy → New version → Anyone');
 }
 
