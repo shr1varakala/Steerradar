@@ -11,8 +11,8 @@
  * ============================================================================
  */
 
-const CACHE_NAME = 'steeradar-v10.2.0';
-const RUNTIME_CACHE = 'steeradar-runtime-v10.2.0';
+const CACHE_NAME = 'steeradar-v13.0.0';
+const RUNTIME_CACHE = 'steeradar-runtime-v13.0.0';
 
 // Files to cache immediately on install (App Shell)
 const PRECACHE_URLS = [
