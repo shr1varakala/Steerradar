@@ -1,10 +1,9 @@
 /**
- * Steeradar backend — v8.3
- * Full-featured: Password + OTP auth, SteerAgent flow, Admin panel,
- * Saved map points, beautiful welcome email with personal note from SteerMan.
+ * Steeradar backend — v8.4
+ * FIXED: CORS headers, photo URL handling, Hive media support, sheet auto-migration.
  */
 
-const VERSION = '8.3';
+const VERSION = '8.4';
 const APP_NAME = 'Steeradar';
 const APP_URL = 'https://suryasticsai.github.io/Steeradar/';
 const LOGO_URL = 'https://raw.githubusercontent.com/suryasticsai/Steeradar/main/steerardar-logo.png';
@@ -23,12 +22,12 @@ const OTP_DAILY_CAP = 80;
 const OTP_COOLDOWN_MS = 45000;
 const LANE_TTL_MS = 24 * 3600 * 1000;
 const PRESENCE_TTL_MS = 2 * 60 * 1000;
-const MAX_BODY_CHARS = 1200000;
+const MAX_BODY_CHARS = 5000000;
 const MAX_POINTS_PER_USER = 200;
 const PW_MIN = 6;
 const PW_MAX = 100;
 const VEHICLE_TYPES = ['bus', 'car', 'auto', 'bike', 'walk', 'event', 'two-wheeler'];
-const PHOTO_SLOTS = ['avatar', 'vehiclePhoto', 'platePhoto', 'upiQr', 'selfie', 'license', 'rc'];
+const PHOTO_SLOTS = ['avatar', 'vehiclePhoto', 'platePhoto', 'upiQr', 'selfie', 'license', 'rc', 'hive', 'lanes', 'misc'];
 
 const SCHEMA = {
   users:        ['phone','email','name','username','vehicle','vehicleType',
@@ -48,7 +47,8 @@ const SCHEMA = {
                  'from','via','to','total','taken','fare','lat','lng',
                  'status','ts','peerId','lastSeen','showPlate'],
   hive:         ['id','ownerPhone','name','avatar','community',
-                 'title','text','tags','time','likes','ts','vehicle'],
+                 'title','text','tags','time','likes','ts','vehicle',
+                 'photoUrl','mediaUrl','mediaType'],
   likes:        ['key','postId','phone','ts'],
   messages:     ['id','roomId','roomType','fromVehicle','fromPhone',
                  'sender','text','seq','ts'],
@@ -96,6 +96,21 @@ function isPhone(v) { return /^\d{10}$/.test(String(v || '')); }
 function isEmail(v) { return /^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$/.test(String(v || '')); }
 function isVehicle(v) { return /^[A-Z0-9]{4,15}$/.test(String(v || '')); }
 function normVehicle(v) { return String(v || '').replace(/[\s-]/g, '').toUpperCase(); }
+
+/**
+ * Extract a Google Drive fileId from various URL formats.
+ * Accepts: /thumbnail?id=X, /uc?id=X, /file/d/X/view, or a raw fileId.
+ */
+function extractDriveId(url) {
+  const s = String(url || '').trim();
+  if (!s) return '';
+  if (/^[A-Za-z0-9_-]{20,64}$/.test(s)) return s;
+  let m = s.match(/[?&]id=([\w-]{10,})/);
+  if (m) return m[1];
+  m = s.match(/\/d\/([\w-]{10,})/);
+  if (m) return m[1];
+  return '';
+}
 
 function toNum(v, min, max, dflt) {
   const n = Number(v);
@@ -199,6 +214,20 @@ function getSheet(name) {
   return sh;
 }
 
+/**
+ * Append any missing columns from SCHEMA to an existing sheet.
+ */
+function migrateSheet(name) {
+  const sh = getSheet(name);
+  const cols = SCHEMA[name];
+  const existing = sh.getRange(1, 1, 1, Math.max(1, sh.getLastColumn())).getValues()[0].map(String);
+  const missing = cols.filter(function (c) { return existing.indexOf(c) < 0; });
+  if (!missing.length) return;
+  const startCol = existing.length + 1;
+  sh.getRange(1, startCol, 1, missing.length).setNumberFormat('@').setValues([missing]).setFontWeight('bold');
+  Logger.log('Migrated ' + name + ': added ' + missing.join(', '));
+}
+
 function readAll(name) {
   const sh = getSheet(name);
   const last = sh.getLastRow();
@@ -248,43 +277,33 @@ function withLock(fn) {
 
 // ─── Email building blocks ───
 function emailHeader() {
-  const lines = [
-    '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F1F3F6;padding:32px 16px;">',
-    '<tr><td align="center">',
-    '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background:#FFFFFF;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">',
-    '<tr><td align="center" style="background:linear-gradient(135deg,' + TEAL + ' 0%,' + TEAL2 + ' 100%);padding:36px 24px 28px;">',
-    '<img src="' + LOGO_URL + '" alt="' + APP_NAME + '" width="84" height="84" style="display:block;border-radius:50%;border:3px solid rgba(255,255,255,0.3);background:#FFFFFF;object-fit:cover;">',
-    '<div style="color:#FFFFFF;font-size:24px;font-weight:800;letter-spacing:-0.5px;margin-top:14px;">Steer<span>adar</span><span style="color:' + CORAL + ';">.</span></div>',
-    '<div style="color:rgba(255,255,255,0.85);font-size:11px;margin-top:6px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;">Community rides</div>',
-    '</td></tr>',
-    '<tr><td style="padding:36px 32px;color:' + INK + ';">'
-  ];
-  return lines.join('');
+  return '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F1F3F6;padding:32px 16px;">'
+    + '<tr><td align="center">'
+    + '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background:#FFFFFF;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">'
+    + '<tr><td align="center" style="background:linear-gradient(135deg,' + TEAL + ' 0%,' + TEAL2 + ' 100%);padding:36px 24px 28px;">'
+    + '<img src="' + LOGO_URL + '" alt="' + APP_NAME + '" width="84" height="84" style="display:block;border-radius:50%;border:3px solid rgba(255,255,255,0.3);background:#FFFFFF;object-fit:cover;">'
+    + '<div style="color:#FFFFFF;font-size:24px;font-weight:800;letter-spacing:-0.5px;margin-top:14px;">Steer<span>adar</span><span style="color:' + CORAL + ';">.</span></div>'
+    + '<div style="color:rgba(255,255,255,0.85);font-size:11px;margin-top:6px;letter-spacing:1.4px;text-transform:uppercase;font-weight:700;">Community rides</div>'
+    + '</td></tr>'
+    + '<tr><td style="padding:36px 32px;color:' + INK + ';">';
 }
 
 function emailFooter() {
-  const lines = [
-    '</td></tr>',
-    '<tr><td style="padding:24px 32px 32px;border-top:1px solid #E5E7EB;background:#F8F9FB;">',
-    '<div style="text-align:center;color:#9CA3AF;font-size:12px;line-height:1.6;">',
-    '<div style="font-weight:700;color:#6B7280;margin-bottom:6px;">Thank you for riding with us 🚌</div>',
-    '<div>' + APP_NAME + ' · ' + new Date().getFullYear() + '</div>',
-    '<div style="margin-top:14px;font-size:11px;">',
-    '<a href="' + APP_URL + '" style="color:' + TEAL + ';text-decoration:none;font-weight:700;">Visit Steeradar</a>',
-    '</div>',
-    '<div style="margin-top:18px;font-size:10px;color:#B4BAC6;">If you didn\'t request this email, you can safely ignore it.</div>',
-    '</div></td></tr>',
-    '</table></td></tr></table>'
-  ];
-  return lines.join('');
+  return '</td></tr>'
+    + '<tr><td style="padding:24px 32px 32px;border-top:1px solid #E5E7EB;background:#F8F9FB;">'
+    + '<div style="text-align:center;color:#9CA3AF;font-size:12px;line-height:1.6;">'
+    + '<div style="font-weight:700;color:#6B7280;margin-bottom:6px;">Thank you for riding with us 🚌</div>'
+    + '<div>' + APP_NAME + ' · ' + new Date().getFullYear() + '</div>'
+    + '<div style="margin-top:14px;font-size:11px;">'
+    + '<a href="' + APP_URL + '" style="color:' + TEAL + ';text-decoration:none;font-weight:700;">Visit Steeradar</a>'
+    + '</div>'
+    + '<div style="margin-top:18px;font-size:10px;color:#B4BAC6;">If you didn\'t request this email, you can safely ignore it.</div>'
+    + '</div></td></tr></table></td></tr></table>';
 }
 
 function emailShell(bodyHtml) {
   return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#F1F3F6;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;">'
-    + emailHeader()
-    + bodyHtml
-    + emailFooter()
-    + '</body></html>';
+    + emailHeader() + bodyHtml + emailFooter() + '</body></html>';
 }
 
 function rowKV(label, value, accent) {
@@ -330,129 +349,82 @@ function buildWelcome(email, name, vehicle, community, phone) {
   const safeVehicle = escapeHtml(vehicle || '');
   const safeCommunity = escapeHtml(community || 'Not specified');
 
-  const personalNoteHTML = `
-    <div style="margin: 28px 0; padding: 20px; border-left: 4px solid ${CORAL}; background: linear-gradient(135deg, #FEF2F2 0%, #FFF5F5 100%); border-radius: 0 10px 10px 0;">
-      <div style="display:block; margin-bottom:12px;">
-        <span style="display:inline-block; background:${CORAL}; color:#FFFFFF; font-size:10px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; padding:5px 12px; border-radius:20px;">💌 Personal Note</span>
-      </div>
-      <p style="margin: 0; color: ${INK}; font-size: 15px; line-height: 1.7; font-style: italic;">
-        "Hey ${firstName}, I'm absolutely thrilled to welcome you to the Steeradar family! This platform was built for drivers, by drivers. Our goal is to make your daily commute safer, more connected, and more rewarding. If you ever have a suggestion or just want to chat, the Hive is the place to be. Happy driving!"
-      </p>
-      <p style="margin: 14px 0 0; color: ${MUTED}; font-size: 13px; font-weight: 700; text-align: right;">
-        — SteerMan<br>
-        <span style="font-weight: 400; font-size: 11px; color: ${SOFT};">Maker of Steeradar</span>
-      </p>
-    </div>
-  `;
+  const personalNoteHTML = '<div style="margin: 28px 0; padding: 20px; border-left: 4px solid ' + CORAL + '; background: linear-gradient(135deg, #FEF2F2 0%, #FFF5F5 100%); border-radius: 0 10px 10px 0;">'
+    + '<div style="display:block; margin-bottom:12px;">'
+    + '<span style="display:inline-block; background:' + CORAL + '; color:#FFFFFF; font-size:10px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; padding:5px 12px; border-radius:20px;">💌 Personal Note</span>'
+    + '</div>'
+    + '<p style="margin: 0; color: ' + INK + '; font-size: 15px; line-height: 1.7; font-style: italic;">'
+    + '"Hey ' + firstName + ', I\'m absolutely thrilled to welcome you to the Steeradar family! This platform was built for drivers, by drivers. Our goal is to make your daily commute safer, more connected, and more rewarding. If you ever have a suggestion or just want to chat, the Hive is the place to be. Happy driving!"'
+    + '</p>'
+    + '<p style="margin: 14px 0 0; color: ' + MUTED + '; font-size: 13px; font-weight: 700; text-align: right;">'
+    + '— SteerMan<br>'
+    + '<span style="font-weight: 400; font-size: 11px; color: ' + SOFT + ';">Maker of Steeradar</span>'
+    + '</p></div>';
 
-  const userDetailsHTML = `
-    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0 0; background:#F8F9FB; border-radius:14px; border: 1px solid #E5E7EB;">
-      <tr><td style="padding: 20px 22px;">
-        <div style="color: ${TEAL}; font-size: 11px; font-weight: 800; letter-spacing: 1.6px; text-transform: uppercase; margin-bottom: 16px;">📋 Your Account Details</div>
-        ${rowKV('Name', name)}
-        ${rowKV('User Type', 'RearAgent')}
-        ${rowKV('User ID (Phone)', safePhone, true)}
-        ${rowKV('Email', safeEmail)}
-        ${rowKV('Vehicle', safeVehicle)}
-        ${rowKV('Community', safeCommunity)}
-      </td></tr>
-    </table>
-  `;
+  const userDetailsHTML = '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0 0; background:#F8F9FB; border-radius:14px; border: 1px solid #E5E7EB;">'
+    + '<tr><td style="padding: 20px 22px;">'
+    + '<div style="color: ' + TEAL + '; font-size: 11px; font-weight: 800; letter-spacing: 1.6px; text-transform: uppercase; margin-bottom: 16px;">📋 Your Account Details</div>'
+    + rowKV('Name', name)
+    + rowKV('User Type', 'RearAgent')
+    + rowKV('User ID (Phone)', safePhone, true)
+    + rowKV('Email', safeEmail)
+    + rowKV('Vehicle', safeVehicle)
+    + rowKV('Community', safeCommunity)
+    + '</td></tr></table>';
 
-  const thankYouHTML = `
-    <div style="margin: 28px 0 0; padding: 20px; text-align: center; background: linear-gradient(135deg, ${TEAL} 0%, ${TEAL2} 100%); border-radius: 12px;">
-      <p style="margin: 0; color: #FFFFFF; font-size: 16px; font-weight: 700; line-height: 1.5;">
-        🙏 Thank you for joining our community!
-      </p>
-      <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 13px; line-height: 1.6;">
-        We're excited to have you on board. Let's make every ride memorable.
-      </p>
-    </div>
-  `;
+  const thankYouHTML = '<div style="margin: 28px 0 0; padding: 20px; text-align: center; background: linear-gradient(135deg, ' + TEAL + ' 0%, ' + TEAL2 + ' 100%); border-radius: 12px;">'
+    + '<p style="margin: 0; color: #FFFFFF; font-size: 16px; font-weight: 700; line-height: 1.5;">🙏 Thank you for joining our community!</p>'
+    + '<p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 13px; line-height: 1.6;">We\'re excited to have you on board. Let\'s make every ride memorable.</p>'
+    + '</div>';
 
-  const body = `
-    <h1 style="margin:0 0 10px;color:${INK};font-size:26px;font-weight:800;letter-spacing:-0.4px;">Welcome aboard, ${firstName}! 🎉</h1>
-    <p style="margin:0 0 26px;color:${MUTED};font-size:15px;line-height:1.6;">
-      Your Steeradar account is ready${community ? ' in <strong style="color:' + INK + ';">' + escapeHtml(community) + '</strong>' : ''}. Here's what you can do now:
-    </p>
-    ${featureTile('🚌', 'Post your lane', 'Share your route and available seats')}
-    ${featureTile('💬', 'Chat with drivers', 'Real-time peer-to-peer messaging')}
-    ${featureTile('📍', 'Track live', 'See vehicles approaching in real time')}
-    ${featureTile('⭐', 'Build trust', 'Rate and get rated after each ride')}
-    ${personalNoteHTML}
-    ${userDetailsHTML}
-    ${thankYouHTML}
-    <p style="margin: 24px 0 0; color: ${SOFT}; font-size: 12px; line-height: 1.7; text-align: center;">
-      Need help? Just reply to this email or find us in the Hive.<br>
-      We're always here for you.
-    </p>
-  `;
+  const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:26px;font-weight:800;letter-spacing:-0.4px;">Welcome aboard, ' + firstName + '! 🎉</h1>'
+    + '<p style="margin:0 0 26px;color:' + MUTED + ';font-size:15px;line-height:1.6;">'
+    + 'Your Steeradar account is ready' + (community ? ' in <strong style="color:' + INK + ';">' + escapeHtml(community) + '</strong>' : '') + '. Here\'s what you can do now:'
+    + '</p>'
+    + featureTile('🚌', 'Post your lane', 'Share your route and available seats')
+    + featureTile('💬', 'Chat with drivers', 'Real-time peer-to-peer messaging')
+    + featureTile('📍', 'Track live', 'See vehicles approaching in real time')
+    + featureTile('⭐', 'Build trust', 'Rate and get rated after each ride')
+    + personalNoteHTML + userDetailsHTML + thankYouHTML
+    + '<p style="margin: 24px 0 0; color: ' + SOFT + '; font-size: 12px; line-height: 1.7; text-align: center;">'
+    + 'Need help? Just reply to this email or find us in the Hive.<br>We\'re always here for you.</p>';
 
   return emailShell(body);
 }
 
 function buildAgentApproved(name) {
   const firstName = escapeHtml((name || 'Driver').split(' ')[0]);
-  const body = `
-    <h1 style="margin:0 0 10px;color:${INK};font-size:26px;font-weight:800;letter-spacing:-0.4px;">You're a SteerAgent now! 🎉</h1>
-    <p style="margin:0 0 22px;color:${MUTED};font-size:15px;line-height:1.6;">
-      Congratulations ${firstName}! Your application has been reviewed and <strong style="color:${TEAL};">approved</strong>.
-    </p>
-    <div style="background: linear-gradient(135deg, #F0FDFA 0%, #ECFDF5 100%); border: 1px solid ${TEAL}; border-radius: 12px; padding: 20px; margin: 20px 0;">
-      <div style="color:${TEAL}; font-size:11px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; margin-bottom:10px;">✓ Unlocked Features</div>
-      <p style="margin:6px 0; color:${INK}; font-size:14px;">🚌 Post your own lanes</p>
-      <p style="margin:6px 0; color:${INK}; font-size:14px;">💰 Accept payments via UPI</p>
-      <p style="margin:6px 0; color:${INK}; font-size:14px;">👻 Ghost mode & alerts</p>
-      <p style="margin:6px 0; color:${INK}; font-size:14px;">📊 Trip tracking & history</p>
-    </div>
-    <div style="text-align:center; margin: 28px 0;">
-      <a href="${APP_URL}" style="display:inline-block; background:${TEAL}; color:#FFFFFF; font-weight:800; font-size:15px; padding:14px 36px; border-radius:12px; text-decoration:none;">Start Driving</a>
-    </div>
-  `;
+  const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:26px;font-weight:800;letter-spacing:-0.4px;">You\'re a SteerAgent now! 🎉</h1>'
+    + '<p style="margin:0 0 22px;color:' + MUTED + ';font-size:15px;line-height:1.6;">'
+    + 'Congratulations ' + firstName + '! Your application has been reviewed and <strong style="color:' + TEAL + ';">approved</strong>.'
+    + '</p>'
+    + '<div style="background: linear-gradient(135deg, #F0FDFA 0%, #ECFDF5 100%); border: 1px solid ' + TEAL + '; border-radius: 12px; padding: 20px; margin: 20px 0;">'
+    + '<div style="color:' + TEAL + '; font-size:11px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; margin-bottom:10px;">✓ Unlocked Features</div>'
+    + '<p style="margin:6px 0; color:' + INK + '; font-size:14px;">🚌 Post your own lanes</p>'
+    + '<p style="margin:6px 0; color:' + INK + '; font-size:14px;">💰 Accept payments via UPI</p>'
+    + '<p style="margin:6px 0; color:' + INK + '; font-size:14px;">👻 Ghost mode & alerts</p>'
+    + '<p style="margin:6px 0; color:' + INK + '; font-size:14px;">📊 Trip tracking & history</p>'
+    + '</div>'
+    + '<div style="text-align:center; margin: 28px 0;">'
+    + '<a href="' + APP_URL + '" style="display:inline-block; background:' + TEAL + '; color:#FFFFFF; font-weight:800; font-size:15px; padding:14px 36px; border-radius:12px; text-decoration:none;">Start Driving</a>'
+    + '</div>';
   return emailShell(body);
 }
 
 function buildAgentRejected(name, reason) {
   const firstName = escapeHtml((name || 'Driver').split(' ')[0]);
   const safeReason = escapeHtml(reason || 'Documents were not valid.');
-  const body = `
-    <h1 style="margin:0 0 10px;color:${INK};font-size:24px;font-weight:800;">Application Update</h1>
-    <p style="margin:0 0 22px;color:${MUTED};font-size:15px;line-height:1.6;">
-      Hi ${firstName}, we reviewed your SteerAgent application but couldn't approve it at this time.
-    </p>
-    <div style="background:#FEF2F2; border-left: 4px solid ${CORAL}; border-radius: 0 10px 10px 0; padding: 16px 20px; margin: 20px 0;">
-      <div style="color:${CORAL}; font-size:11px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; margin-bottom:8px;">Reason</div>
-      <p style="margin:0; color:${INK}; font-size:14px; line-height:1.6;">${safeReason}</p>
-    </div>
-    <p style="margin:22px 0 0;color:${MUTED};font-size:14px;line-height:1.6;">
-      You can update your documents and apply again anytime from your profile.
-    </p>
-  `;
-  return emailShell(body);
-}
-
-function buildReceipt(driver, from, to, distance, fare, duration) {
-  const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:24px;font-weight:800;letter-spacing:-0.4px;">Trip receipt 🧾</h1>'
-    + '<p style="margin:0 0 24px;color:' + MUTED + ';font-size:15px;line-height:1.6;">Thanks for completing your trip.</p>'
-    + '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F8F9FB;border-radius:14px;margin-bottom:22px;"><tr><td style="padding:18px;">'
-    + rowKV('Driver', driver)
-    + rowKV('Pickup', from)
-    + rowKV('Drop-off', to)
-    + rowKV('Distance', distance)
-    + rowKV('Duration', duration)
-    + rowKV('Fare', '₹ ' + fare, true)
-    + '</td></tr></table>';
-
-  return emailShell(body);
-}
-
-function buildRateRequest(driver, url) {
-  const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:24px;font-weight:800;letter-spacing:-0.4px;">How was your ride? ⭐</h1>'
-    + '<p style="margin:0 0 24px;color:' + MUTED + ';font-size:15px;line-height:1.6;">Rate your experience with ' + escapeHtml(driver) + '</p>'
-    + '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 22px;"><tr><td align="center">'
-    + '<a href="' + url + '" style="display:inline-block;background:' + TEAL + ';color:#FFFFFF;font-weight:800;font-size:15px;padding:14px 36px;border-radius:12px;text-decoration:none;">Rate now</a>'
-    + '</td></tr></table>';
-
+  const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:24px;font-weight:800;">Application Update</h1>'
+    + '<p style="margin:0 0 22px;color:' + MUTED + ';font-size:15px;line-height:1.6;">'
+    + 'Hi ' + firstName + ', we reviewed your SteerAgent application but couldn\'t approve it at this time.'
+    + '</p>'
+    + '<div style="background:#FEF2F2; border-left: 4px solid ' + CORAL + '; border-radius: 0 10px 10px 0; padding: 16px 20px; margin: 20px 0;">'
+    + '<div style="color:' + CORAL + '; font-size:11px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; margin-bottom:8px;">Reason</div>'
+    + '<p style="margin:0; color:' + INK + '; font-size:14px; line-height:1.6;">' + safeReason + '</p>'
+    + '</div>'
+    + '<p style="margin:22px 0 0;color:' + MUTED + ';font-size:14px;line-height:1.6;">'
+    + 'You can update your documents and apply again anytime from your profile.'
+    + '</p>';
   return emailShell(body);
 }
 
@@ -460,7 +432,6 @@ function buildReportAck() {
   const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:24px;font-weight:800;letter-spacing:-0.4px;">We received your report 🛡️</h1>'
     + '<p style="margin:0 0 20px;color:' + MUTED + ';font-size:15px;line-height:1.6;">Our moderators will review it shortly.</p>'
     + '<p style="margin:0;color:' + SOFT + ';font-size:13px;">We take community safety seriously.</p>';
-
   return emailShell(body);
 }
 
@@ -468,12 +439,8 @@ function buildReportAck() {
 function sendMail(to, subject, html, plain) {
   try {
     MailApp.sendEmail({
-      to: to,
-      subject: subject,
-      htmlBody: html,
-      body: plain || subject,
-      name: APP_NAME,
-      noReply: true
+      to: to, subject: subject, htmlBody: html,
+      body: plain || subject, name: APP_NAME, noReply: true
     });
     return true;
   } catch (e) {
@@ -483,45 +450,33 @@ function sendMail(to, subject, html, plain) {
 }
 
 function sendOtpEmail(to, code, purpose) {
-  const subject = '🔐 Your Steeradar code: ' + code;
-  const plain = 'Your Steeradar code is ' + code + '. Expires in 10 minutes.';
-  return sendMail(to, subject, buildOtp(code, purpose), plain);
+  return sendMail(to, '🔐 Your Steeradar code: ' + code,
+    buildOtp(code, purpose),
+    'Your Steeradar code is ' + code + '. Expires in 10 minutes.');
 }
 
 function sendWelcomeEmail(to, name, vehicle, community, phone, email) {
-  const subject = '🎉 Welcome to Steeradar, ' + ((name || '').split(' ')[0] || 'friend') + '!';
-  const plain = 'Welcome ' + name + '! Your vehicle ' + vehicle + ' is now linked. User ID: ' + phone + '.';
-  return sendMail(to, subject, buildWelcome(email || to, name, vehicle, community, phone), plain);
+  return sendMail(to, '🎉 Welcome to Steeradar, ' + ((name || '').split(' ')[0] || 'friend') + '!',
+    buildWelcome(email || to, name, vehicle, community, phone),
+    'Welcome ' + name + '! User ID: ' + phone);
 }
 
 function sendAgentApprovedEmail(to, name) {
-  const subject = '🎉 You\'re a SteerAgent now!';
-  const plain = 'Congratulations ' + name + '! Your SteerAgent application has been approved.';
-  return sendMail(to, subject, buildAgentApproved(name), plain);
+  return sendMail(to, '🎉 You\'re a SteerAgent now!',
+    buildAgentApproved(name),
+    'Congratulations ' + name + '! Your SteerAgent application has been approved.');
 }
 
 function sendAgentRejectedEmail(to, name, reason) {
-  const subject = '📝 Update on your SteerAgent application';
-  const plain = 'Hi ' + name + '. Your application needs attention: ' + reason;
-  return sendMail(to, subject, buildAgentRejected(name, reason), plain);
-}
-
-function sendReceiptEmail(to, driver, from, to_, distance, fare, duration) {
-  const subject = '🧾 Your Steeradar trip receipt';
-  const plain = 'Trip receipt: ₹' + fare + ' for ' + distance + '.';
-  return sendMail(to, subject, buildReceipt(driver, from, to_, distance, fare, duration), plain);
-}
-
-function sendRateRequestEmail(to, driver, url) {
-  const subject = '⭐ How was your Steeradar ride?';
-  const plain = 'Rate your ride with ' + driver + ': ' + url;
-  return sendMail(to, subject, buildRateRequest(driver, url), plain);
+  return sendMail(to, '📝 Update on your SteerAgent application',
+    buildAgentRejected(name, reason),
+    'Hi ' + name + '. Your application needs attention: ' + reason);
 }
 
 function sendReportAckEmail(to) {
-  const subject = '🛡️ We received your Steeradar report';
-  const plain = 'We received your report and will review it shortly.';
-  return sendMail(to, subject, buildReportAck(), plain);
+  return sendMail(to, '🛡️ We received your Steeradar report',
+    buildReportAck(),
+    'We received your report and will review it shortly.');
 }
 
 // ─── Auth ───
@@ -593,12 +548,9 @@ function createSession(phone, device) {
   const t = now();
   appendRow('sessions', {
     tokenHash: sha256Hex(token + pepper()),
-    phone: phone,
-    type: 'access',
-    createdAt: t,
-    expiresAt: t + SESSION_DAYS * 24 * 3600 * 1000,
-    device: clean(device, 100),
-    lastSeen: t
+    phone: phone, type: 'access',
+    createdAt: t, expiresAt: t + SESSION_DAYS * 24 * 3600 * 1000,
+    device: clean(device, 100), lastSeen: t
   });
   return token;
 }
@@ -606,21 +558,18 @@ function createSession(phone, device) {
 function publicSelf(u) {
   const isAgent = u.role === 'agent' && u.agentStatus === 'active';
   return {
-    phone: u.phone,
-    email: u.email,
-    name: u.name,
-    username: u.username,
-    vehicle: u.vehicle,
-    vehicleType: u.vehicleType,
-    avatarId: u.avatarId,
-    vehiclePhotoId: u.vehiclePhotoId,
-    platePhotoId: u.platePhotoId,
-    upiQrId: u.upiQrId,
+    phone: u.phone, email: u.email, name: u.name, username: u.username,
+    vehicle: u.vehicle, vehicleType: u.vehicleType,
+    avatarId: u.avatarId, vehiclePhotoId: u.vehiclePhotoId,
+    platePhotoId: u.platePhotoId, upiQrId: u.upiQrId,
     community: u.community || '',
     role: u.role || 'user',
     agentStatus: u.agentStatus || '',
     isAgent: isAgent,
     isAdmin: isAdmin_(u),
+    ghostMode: u.ghostMode === 'true',
+    upiId: u.upiQrId || '',
+    photo: u.avatarId ? 'https://drive.google.com/thumbnail?id=' + u.avatarId + '&sz=w400' : '',
     rating: Number(u.ratingCount) > 0
       ? Math.round((Number(u.ratingSum) / Number(u.ratingCount)) * 10) / 10
       : 5.0
@@ -644,12 +593,7 @@ function takeVerifiedOtp(phone, purpose) {
 
 function logAudit(phone, action, detail) {
   try {
-    appendRow('audit', {
-      ts: now(),
-      phone: phone || '',
-      action: action || '',
-      detail: clean(detail, 500)
-    });
+    appendRow('audit', { ts: now(), phone: phone || '', action: action || '', detail: clean(detail, 500) });
   } catch (e) {}
 }
 
@@ -671,12 +615,7 @@ H.debug = function (b, u) {
     try { counts[names[i]] = readAll(names[i]).length; }
     catch (e) { counts[names[i]] = -1; }
   }
-  return {
-    version: VERSION,
-    user: u.name,
-    counts: counts,
-    mailQuota: safeQuota()
-  };
+  return { version: VERSION, user: u.name, counts: counts, mailQuota: safeQuota() };
 };
 
 H.sendOtp = function (b) {
@@ -706,11 +645,7 @@ H.sendOtp = function (b) {
   const all = readAll('otps').filter(function (o) { return o.phone === phone; });
   const recent = all.filter(function (o) { return t - Number(o.createdAt) < OTP_COOLDOWN_MS; });
   if (recent.length) {
-    return {
-      ok: false,
-      error: 'cooldown',
-      wait: Math.ceil((OTP_COOLDOWN_MS - (t - Number(recent[0].createdAt))) / 1000)
-    };
+    return { ok: false, error: 'cooldown', wait: Math.ceil((OTP_COOLDOWN_MS - (t - Number(recent[0].createdAt))) / 1000) };
   }
 
   for (let i = 0; i < all.length; i++) {
@@ -723,16 +658,10 @@ H.sendOtp = function (b) {
   const code = String(parseInt(hash.slice(0, 8), 16) % 1000000).padStart(6, '0');
 
   appendRow('otps', {
-    id: shortId('otp'),
-    phone: phone,
-    email: email,
-    purpose: purpose,
+    id: shortId('otp'), phone: phone, email: email, purpose: purpose,
     codeHash: sha256Hex(phone + ':' + code + ':' + pepper()),
-    createdAt: t,
-    expiresAt: t + OTP_TTL_MS,
-    attempts: 0,
-    verifiedAt: '',
-    consumed: ''
+    createdAt: t, expiresAt: t + OTP_TTL_MS,
+    attempts: 0, verifiedAt: '', consumed: ''
   });
 
   props.setProperty(dk, String(sent + 1));
@@ -761,27 +690,17 @@ H.verifyOtp = function (b) {
   if (!row) return { ok: false, error: 'no_code' };
 
   const attempts = Number(row.attempts);
-  if (attempts >= OTP_MAX_ATTEMPTS) {
-    return { ok: false, error: 'too_many_attempts', attemptsLeft: 0 };
-  }
+  if (attempts >= OTP_MAX_ATTEMPTS) return { ok: false, error: 'too_many_attempts', attemptsLeft: 0 };
 
   if (sha256Hex(phone + ':' + code + ':' + pepper()) !== row.codeHash) {
     updateRow('otps', row._row, { attempts: attempts + 1 });
-    return {
-      ok: false,
-      error: 'wrong_code',
-      attemptsLeft: Math.max(0, OTP_MAX_ATTEMPTS - attempts - 1)
-    };
+    return { ok: false, error: 'wrong_code', attemptsLeft: Math.max(0, OTP_MAX_ATTEMPTS - attempts - 1) };
   }
 
   updateRow('otps', row._row, { verifiedAt: t });
-  return { ok: true };
+  return { ok: true, verified: true };
 };
 
-/**
- * REGISTER — accepts phone, name, username, vehicle, optional password.
- * Password is stored as hash + salt. If omitted, user can log in via OTP only.
- */
 H.register = function (b) {
   const phone = String(b.phone || '');
   if (!isPhone(phone)) throw new ApiError('bad_phone');
@@ -801,18 +720,14 @@ H.register = function (b) {
   const vehicle = normVehicle(b.vehicle);
   const vehicleType = VEHICLE_TYPES.indexOf(b.vehicleType) !== -1 ? b.vehicleType : 'car';
 
-  // Optional password
   let passHash = '', salt = '';
   if (b.password) {
     const pw = String(b.password);
-    if (pw.length < PW_MIN || pw.length > PW_MAX) {
-      return { ok: false, error: 'weak_password' };
-    }
+    if (pw.length < PW_MIN || pw.length > PW_MAX) return { ok: false, error: 'weak_password' };
     salt = newSalt();
     passHash = hashPassword(pw, salt);
   }
 
-  // Uniqueness checks
   const users = readAll('users');
   for (let i = 0; i < users.length; i++) {
     if (users[i].phone === phone) return { ok: false, error: 'phone_exists' };
@@ -826,43 +741,25 @@ H.register = function (b) {
 
   const t = now();
   appendRow('users', {
-    phone: phone,
-    email: email,
-    name: name,
-    username: username,
-    vehicle: vehicle,
-    vehicleType: vehicleType,
-    avatarId: '',
-    vehiclePhotoId: '',
-    platePhotoId: '',
-    upiQrId: '',
+    phone: phone, email: email, name: name, username: username,
+    vehicle: vehicle, vehicleType: vehicleType,
+    avatarId: '', vehiclePhotoId: '', platePhotoId: '', upiQrId: '',
     community: clean(b.community, 40),
-    role: 'user',
-    status: 'active',
-    agentStatus: '',
-    laneCount: 0,
-    tripCount: 0,
-    ratingSum: 0,
-    ratingCount: 0,
-    passHash: passHash,
-    salt: salt,
-    createdAt: t,
-    lastLogin: t,
-    device: clean(b.device, 100)
+    role: 'user', status: 'active', agentStatus: '',
+    laneCount: 0, tripCount: 0, ratingSum: 0, ratingCount: 0,
+    passHash: passHash, salt: salt,
+    createdAt: t, lastLogin: t, device: clean(b.device, 100)
   });
 
   updateRow('otps', otp._row, { consumed: '1' });
 
   const token = createSession(phone, b.device);
 
-  try {
-    sendWelcomeEmail(email, name, vehicle, b.community, phone, email);
-  } catch (e) {
-    Logger.log('Welcome email failed: ' + e);
-  }
+  try { sendWelcomeEmail(email, name, vehicle, b.community, phone, email); }
+  catch (e) { Logger.log('Welcome email failed: ' + e); }
 
   logAudit(phone, 'register', vehicle);
-  return { ok: true, token: token, user: publicSelf(findUser(phone)) };
+  return { ok: true, token: token, phone: phone, user: publicSelf(findUser(phone)) };
 };
 
 /**
@@ -871,44 +768,36 @@ H.register = function (b) {
  */
 H.login = function (b) {
   const identity = String(b.phone || '').trim();
-  if (!identity) throw new ApiError('bad_identity');
+  if (!identity) throw new ApiError('bad_identity', 'Enter phone or email');
 
   const isEmailLogin = identity.indexOf('@') > -1;
   let user = null;
 
   if (isEmailLogin) {
-    if (!isEmail(identity)) throw new ApiError('bad_email');
+    if (!isEmail(identity)) throw new ApiError('bad_email', 'Invalid email');
     user = findUserByEmail(identity);
     if (!user) return { ok: false, error: 'not_registered' };
   } else {
-    if (!isPhone(identity)) throw new ApiError('bad_phone');
+    if (!isPhone(identity)) throw new ApiError('bad_phone', 'Invalid phone number');
     user = findUser(identity);
     if (!user) return { ok: false, error: 'not_registered' };
   }
 
   const phone = user.phone;
 
-  // Path A: password login
   if (b.password) {
-    if (!user.passHash) {
-      return { ok: false, error: 'no_password' };
-    }
+    if (!user.passHash) return { ok: false, error: 'no_password' };
     const hash = hashPassword(String(b.password), user.salt);
     if (hash !== user.passHash) {
-      try { rateLimit(['pw:' + phone], 8, 900); } catch (e) {
-        throw new ApiError('too_many_attempts', 'Too many attempts. Try again in 15 minutes.');
-      }
+      try { rateLimit(['pw:' + phone], 8, 900); }
+      catch (e) { throw new ApiError('too_many_attempts', 'Too many attempts. Try again in 15 minutes.'); }
       return { ok: false, error: 'bad_credentials' };
     }
-  }
-  // Path B: OTP login
-  else if (b.code) {
+  } else if (b.code) {
     const otp = takeVerifiedOtp(phone, 'login');
     if (!otp) return { ok: false, error: 'not_verified' };
     updateRow('otps', otp._row, { consumed: '1' });
-  }
-  // No credentials
-  else {
+  } else {
     return { ok: false, error: 'no_credentials' };
   }
 
@@ -916,14 +805,12 @@ H.login = function (b) {
 
   const token = createSession(phone, b.device);
   logAudit(phone, 'login', isEmailLogin ? 'email' : 'phone');
-  return { ok: true, token: token, user: publicSelf(findUser(phone)) };
+  return { ok: true, token: token, phone: phone, user: publicSelf(findUser(phone)) };
 };
 
 H.setPassword = function (b, u) {
   const pw = String(b.password || '');
-  if (pw.length < PW_MIN || pw.length > PW_MAX) {
-    return { ok: false, error: 'weak_password' };
-  }
+  if (pw.length < PW_MIN || pw.length > PW_MAX) return { ok: false, error: 'weak_password' };
   if (u.passHash && b.oldPassword) {
     const oldHash = hashPassword(String(b.oldPassword), u.salt);
     if (oldHash !== u.passHash) return { ok: false, error: 'bad_credentials' };
@@ -947,8 +834,11 @@ H.checkSession = function (b, u) {
   return { valid: true, user: publicSelf(u) };
 };
 
-H.getMe = function (b, u) { return { ok: true, user: publicSelf(u) }; };
+H.getMe = function (b, u) { return publicSelf(u); };
 
+/**
+ * updateMe — accepts both `photo` (URL) and `avatarId` (fileId).
+ */
 H.updateMe = function (b, u) {
   const patch = {};
   const r = b.patch || b;
@@ -977,28 +867,45 @@ H.updateMe = function (b, u) {
     patch.vehicleType = r.vehicleType;
   }
 
+  // Accept upiId, upiQrId, city, bio
   if (r.upiId !== undefined) patch.upiQrId = clean(r.upiId, 100);
+  if (r.upiQrId !== undefined) patch.upiQrId = clean(r.upiQrId, 100);
   if (r.city !== undefined) patch.community = clean(r.city, 60);
-  if (r.bio !== undefined) patch.username = clean(r.bio, 30); // reuse for bio
+  if (r.community !== undefined) patch.community = clean(r.community, 60);
 
-  const tag = ownerTag(u.phone);
+  // Ghost mode
+  if (r.ghostMode !== undefined) patch.ghostMode = r.ghostMode ? 'true' : 'false';
+
+  // Accept `photo` as a URL — extract fileId
+  if (r.photo !== undefined) {
+    const url = String(r.photo || '');
+    if (url === '') {
+      patch.avatarId = '';
+    } else {
+      const fid = extractDriveId(url);
+      if (fid && fileOwnedBy(fid, ownerTag(u.phone))) patch.avatarId = fid;
+    }
+  }
+
+  // Accept direct fileId fields
   const slots = ['avatarId', 'vehiclePhotoId', 'platePhotoId', 'upiQrId'];
   for (let i = 0; i < slots.length; i++) {
     const k = slots[i];
     if (r[k] === undefined) continue;
     const id = String(r[k] || '');
     if (id === '') { patch[k] = ''; continue; }
-    if (!isId(id) || !fileOwnedBy(id, tag)) continue;
+    if (!isId(id) || !fileOwnedBy(id, ownerTag(u.phone))) continue;
     patch[k] = id;
   }
 
-  if (Object.keys(patch).length) {
-    updateRow('users', u._row, patch);
-  }
-  return { ok: true, user: publicSelf(findUser(u.phone)) };
+  if (Object.keys(patch).length) updateRow('users', u._row, patch);
+  return publicSelf(findUser(u.phone));
 };
 
 // ─── SteerAgent flow ───
+/**
+ * becomeAgent — accepts photo URLs OR fileIds.
+ */
 H.becomeAgent = function (b, u) {
   if (u.role === 'agent' && u.agentStatus === 'active') {
     return { ok: true, user: publicSelf(u), already: true };
@@ -1012,20 +919,22 @@ H.becomeAgent = function (b, u) {
   const vehicleType = VEHICLE_TYPES.indexOf(b.vehicleType) !== -1 ? b.vehicleType : (u.vehicleType || 'car');
   const upiId = clean(b.upiId, 100);
 
-  // Verify photo ownership
+  // Accept URLs OR fileIds for photos
   const tag = ownerTag(u.phone);
-  const vehiclePhotoId = String(b.vehiclePhotoId || b.vehiclePhoto || '');
-  const platePhotoId = String(b.platePhotoId || '');
-  const selfieId = String(b.selfieId || b.selfie || '');
-  const licenseId = String(b.licenseId || b.license || '');
-  const rcId = String(b.rcId || b.rc || '');
 
-  if (vehiclePhotoId && (!isId(vehiclePhotoId) || !fileOwnedBy(vehiclePhotoId, tag))) {
-    throw new ApiError('bad_photo', 'Vehicle photo not yours');
+  function resolvePhoto(v) {
+    if (!v) return '';
+    const s = String(v).trim();
+    if (isId(s) && fileOwnedBy(s, tag)) return s;
+    const fid = extractDriveId(s);
+    if (fid && fileOwnedBy(fid, tag)) return fid;
+    return '';
   }
-  if (selfieId && (!isId(selfieId) || !fileOwnedBy(selfieId, tag))) {
-    throw new ApiError('bad_photo', 'Selfie not yours');
-  }
+
+  const vehiclePhotoId = resolvePhoto(b.vehiclePhotoId || b.vehiclePhoto || b.rcUrl || b.rc);
+  const platePhotoId = resolvePhoto(b.platePhotoId || b.platePhoto);
+  const selfieId = resolvePhoto(b.selfieId || b.selfie || b.photo);
+  const licenseId = resolvePhoto(b.licenseId || b.license);
 
   // Check for existing pending application
   const apps = readAll('applications');
@@ -1037,31 +946,18 @@ H.becomeAgent = function (b, u) {
 
   const appliedAt = now();
   appendRow('applications', {
-    id: shortId('app'),
-    phone: u.phone,
-    name: u.name,
-    vehicle: vehicle,
-    vehicleType: vehicleType,
-    vehiclePhotoId: vehiclePhotoId,
-    platePhotoId: platePhotoId,
-    selfieId: selfieId,
-    upiId: upiId,
-    agreement: 'accepted',
-    status: 'pending',
-    notes: '',
-    appliedAt: appliedAt,
-    reviewedAt: '',
-    reviewedBy: ''
+    id: shortId('app'), phone: u.phone, name: u.name,
+    vehicle: vehicle, vehicleType: vehicleType,
+    vehiclePhotoId: vehiclePhotoId, platePhotoId: platePhotoId,
+    selfieId: selfieId, upiId: upiId, agreement: 'accepted',
+    status: 'pending', notes: '',
+    appliedAt: appliedAt, reviewedAt: '', reviewedBy: ''
   });
 
-  // Update user to pending status
   updateRow('users', u._row, {
-    vehicle: vehicle,
-    vehicleType: vehicleType,
-    vehiclePhotoId: vehiclePhotoId,
-    platePhotoId: platePhotoId,
-    agentStatus: 'pending',
-    upiQrId: upiId
+    vehicle: vehicle, vehicleType: vehicleType,
+    vehiclePhotoId: vehiclePhotoId, platePhotoId: platePhotoId,
+    agentStatus: 'pending', upiQrId: upiId
   });
 
   logAudit(u.phone, 'becomeAgent', vehicle);
@@ -1073,17 +969,11 @@ H.adminPendingAgents = function (b, u) {
   const apps = readAll('applications').filter(function (a) { return a.status === 'pending'; });
   return apps.map(function (a) {
     return {
-      uid: a.phone,
-      phone: a.phone,
-      name: a.name,
-      vehicle: a.vehicle,
-      vehicleType: a.vehicleType,
-      vehiclePhotoId: a.vehiclePhotoId,
-      platePhotoId: a.platePhotoId,
-      selfieId: a.selfieId,
-      upiId: a.upiId,
-      city: '',
-      appliedAt: Number(a.appliedAt)
+      uid: a.phone, phone: a.phone, name: a.name,
+      vehicle: a.vehicle, vehicleType: a.vehicleType,
+      vehiclePhotoId: a.vehiclePhotoId, platePhotoId: a.platePhotoId,
+      selfieId: a.selfieId, upiId: a.upiId,
+      city: '', appliedAt: Number(a.appliedAt)
     };
   });
 };
@@ -1106,29 +996,19 @@ H.adminApproveAgent = function (b, u) {
 
   const reviewedAt = now();
   if (approve) {
-    updateRow('users', target._row, {
-      role: 'agent',
-      agentStatus: 'active'
-    });
+    updateRow('users', target._row, { role: 'agent', agentStatus: 'active' });
     if (appRow) {
       updateRow('applications', appRow._row, {
-        status: 'approved',
-        reviewedAt: reviewedAt,
-        reviewedBy: u.phone
+        status: 'approved', reviewedAt: reviewedAt, reviewedBy: u.phone
       });
     }
     try { sendAgentApprovedEmail(target.email, target.name); } catch (e) {}
   } else {
-    updateRow('users', target._row, {
-      role: 'user',
-      agentStatus: 'rejected'
-    });
+    updateRow('users', target._row, { role: 'user', agentStatus: 'rejected' });
     if (appRow) {
       updateRow('applications', appRow._row, {
-        status: 'rejected',
-        notes: clean(b.reason, 500),
-        reviewedAt: reviewedAt,
-        reviewedBy: u.phone
+        status: 'rejected', notes: clean(b.reason, 500),
+        reviewedAt: reviewedAt, reviewedBy: u.phone
       });
     }
     try { sendAgentRejectedEmail(target.email, target.name, b.reason || 'Documents were not valid.'); } catch (e) {}
@@ -1138,7 +1018,6 @@ H.adminApproveAgent = function (b, u) {
   return { ok: true };
 };
 
-// Legacy alias (frontend uses adminApproveAgent with uid+approve)
 H.adminRejectAgent = function (b, u) {
   return H.adminApproveAgent({ uid: b.uid || b.phone, approve: false, reason: b.reason }, u);
 };
@@ -1147,29 +1026,21 @@ H.adminRejectAgent = function (b, u) {
 function publicLane(l, me) {
   const own = !!me && l.ownerPhone === me.phone;
   return {
-    id: l.id,
-    driver: l.driver,
-    ownerName: l.driver,
-    vehicle: l.vehicle,
-    vehicleType: l.vehicleType,
-    from: l.from,
-    via: l.via,
-    to: l.to,
+    id: l.id, driver: l.driver, ownerName: l.driver,
+    vehicle: l.vehicle, vehicleType: l.vehicleType,
+    from: l.from, via: l.via, to: l.to,
     title: (l.from ? l.from + ' → ' : '') + l.to,
     description: l.via || '',
     total: Number(l.total),
-    seats: Number(l.total) - Number(l.taken),
+    seats: Math.max(0, Number(l.total) - Number(l.taken)),
     taken: Number(l.taken),
     fare: Number(l.fare),
     lat: own ? round(l.lat, 7) : round(l.lat, 3),
     lng: own ? round(l.lng, 7) : round(l.lng, 3),
-    status: l.status,
-    ts: Number(l.ts),
+    status: l.status, ts: Number(l.ts),
     createdAt: new Date(Number(l.ts)).toISOString(),
-    peerId: l.peerId,
-    lastSeen: Number(l.lastSeen),
-    showPlate: l.showPlate || 'true',
-    own: own
+    peerId: l.peerId, lastSeen: Number(l.lastSeen),
+    showPlate: l.showPlate || 'true', own: own
   };
 }
 
@@ -1177,17 +1048,14 @@ function laneFields(row, user, existing) {
   const total = Math.round(toNum(row.total, 1, 60, existing ? Number(existing.total) : 4));
   const taken = Math.round(toNum(row.taken, 0, total, 0));
   return {
-    driver: user.name,
-    vehicle: user.vehicle,
+    driver: user.name, vehicle: user.vehicle,
     vehicleType: VEHICLE_TYPES.indexOf(row.vehicleType) !== -1 ? row.vehicleType : (user.vehicleType || 'car'),
     from: clean(row.from || row.title, 80),
     via: clean(row.via || row.description, 200),
     to: clean(row.to, 80),
-    total: total,
-    taken: taken,
+    total: total, taken: taken,
     fare: Math.round(toNum(row.fare, 0, 10000, 0)),
-    lat: coord(row.lat, 90),
-    lng: coord(row.lng, 180),
+    lat: coord(row.lat, 90), lng: coord(row.lng, 180),
     status: row.status === 'full' ? 'full' : 'live',
     peerId: /^steeradar-veh-[A-Z0-9-]{4,24}$/.test(String(row.peerId || '')) ? row.peerId : '',
     lastSeen: now(),
@@ -1240,8 +1108,7 @@ function ownLane(id, u) {
 H.updateLane = function (b, u) {
   const l = ownLane(b.id, u);
   if (!l) throw new ApiError('not_found');
-  const patch = laneFields(b.row || b, u, l);
-  updateRow('lanes', l._row, patch);
+  updateRow('lanes', l._row, laneFields(b.row || b, u, l));
   return { ok: true };
 };
 
@@ -1260,9 +1127,10 @@ function publicPost(p, me) {
     avatar: p.avatar,
     title: p.title,
     text: p.text,
-    mediaUrl: p.tags && p.tags.indexOf('http') === 0 ? p.tags : '',
-    mediaType: '',
     tags: p.tags,
+    photo: p.photoUrl || '',
+    mediaUrl: p.mediaUrl || '',
+    mediaType: p.mediaType || '',
     time: p.time,
     likes: Number(p.likes),
     ts: Number(p.ts),
@@ -1278,39 +1146,40 @@ H.listHive = function (b, u) {
   return posts.slice(0, 200).map(function (p) { return publicPost(p, u); });
 };
 
+/**
+ * insertHive — accepts text, photo (URL), mediaUrl, mediaType.
+ */
 H.insertHive = function (b, u) {
   const r = b.row || b;
   if (!isId(r.id)) r.id = shortId('H');
 
   const title = clean(r.title, 80);
   const text = clean(String(r.text || '').replace(/\r/g, ''), 2000).trim() || title;
-  if (!text) throw new ApiError('empty', 'Post cannot be empty');
+  if (!text && !r.photo && !r.mediaUrl) throw new ApiError('empty', 'Post cannot be empty');
 
   rateLimit(['hive:' + u.phone], 30, 3600);
 
-  // Save media URL in tags if present
-  let tags = String(r.tags || '')
+  const tags = String(r.tags || '')
     .split('|')
     .map(function (t) { return clean(t, 24); })
     .filter(Boolean)
     .slice(0, 5)
     .join('|');
 
-  if (r.mediaUrl && !tags) tags = clean(r.mediaUrl, 500);
-
   const ts = now();
+  const photoUrl = clean(r.photo, 500);
+  const mediaUrl = clean(r.mediaUrl, 500);
+  const mediaType = clean(r.mediaType, 20);
+
   appendRow('hive', {
-    id: r.id,
-    ownerPhone: u.phone,
-    name: u.name,
+    id: r.id, ownerPhone: u.phone, name: u.name,
     avatar: initials(u.name),
-    title: title,
-    text: text,
-    tags: tags,
-    time: 'just now',
-    likes: 0,
-    ts: ts,
-    vehicle: u.vehicle
+    title: title, text: text, tags: tags,
+    time: 'just now', likes: 0, ts: ts,
+    vehicle: u.vehicle,
+    photoUrl: photoUrl,
+    mediaUrl: mediaUrl,
+    mediaType: mediaType
   });
 
   logAudit(u.phone, 'insertHive', title);
@@ -1334,6 +1203,9 @@ H.updateHive = function (b, u) {
   const patch = {};
   if (r.title !== undefined) patch.title = clean(r.title, 80);
   if (r.text !== undefined) patch.text = clean(r.text, 2000);
+  if (r.photo !== undefined) patch.photoUrl = clean(r.photo, 500);
+  if (r.mediaUrl !== undefined) patch.mediaUrl = clean(r.mediaUrl, 500);
+  if (r.mediaType !== undefined) patch.mediaType = clean(r.mediaType, 20);
   if (r.tags !== undefined) {
     patch.tags = String(r.tags).split('|').map(function (t) { return clean(t, 24); })
       .filter(Boolean).slice(0, 5).join('|');
@@ -1393,15 +1265,9 @@ function checkRoom(roomId, u) {
     }
     return { id: id, type: 'dm' };
   }
-  if (/^local_[-0-9._a-z]{3,40}$/.test(id)) {
-    return { id: id, type: 'local' };
-  }
-  if (/^local-[0-9a-z]{4,8}$/.test(id)) {
-    return { id: id, type: 'local' };
-  }
-  if (/^[A-Za-z0-9_\-:.]{1,60}$/.test(id)) {
-    return { id: id, type: 'room' };
-  }
+  if (/^local_[-0-9._a-z]{3,40}$/.test(id)) return { id: id, type: 'local' };
+  if (/^local-[0-9a-z]{4,8}$/.test(id)) return { id: id, type: 'local' };
+  if (/^[A-Za-z0-9_\-:.]{1,60}$/.test(id)) return { id: id, type: 'room' };
   throw new ApiError('bad_room');
 }
 
@@ -1415,12 +1281,9 @@ H.sendMessage = function (b, u) {
 
   appendRow('messages', {
     id: isId(r.id) ? r.id : shortId('m'),
-    roomId: room.id,
-    roomType: room.type,
-    fromVehicle: u.vehicle,
-    fromPhone: u.phone,
-    sender: u.name,
-    text: text,
+    roomId: room.id, roomType: room.type,
+    fromVehicle: u.vehicle, fromPhone: u.phone,
+    sender: u.name, text: text,
     seq: r.seq != null ? toNum(r.seq, 0, 1e9, '') : '',
     ts: now()
   });
@@ -1439,11 +1302,8 @@ H.getMessages = function (b, u) {
   });
   return all.slice(-limit).map(function (m) {
     return {
-      id: m.id,
-      roomId: m.roomId,
-      from: m.fromVehicle,
-      sender: m.sender,
-      text: m.text,
+      id: m.id, roomId: m.roomId, from: m.fromVehicle,
+      sender: m.sender, text: m.text,
       seq: m.seq === '' ? null : Number(m.seq),
       ts: Number(m.ts),
       mine: m.fromPhone === u.phone
@@ -1457,9 +1317,7 @@ H.updatePresence = function (b, u) {
   rateLimit(['pres:' + u.phone], 12, 60);
 
   const obj = {
-    vehicle: u.vehicle,
-    phone: u.phone,
-    name: u.name,
+    vehicle: u.vehicle, phone: u.phone, name: u.name,
     avatar: initials(u.name),
     peerId: /^steeradar-veh-[A-Z0-9-]{4,24}$/.test(String(r.peerId || '')) ? r.peerId : '',
     vehicleType: VEHICLE_TYPES.indexOf(r.vehicleType) !== -1 ? r.vehicleType : (u.vehicleType || 'car'),
@@ -1485,14 +1343,9 @@ H.activeVehicles = function (b, u) {
   });
   return list.slice(0, 200).map(function (p) {
     return {
-      vehicle: p.vehicle,
-      phone: p.phone,
-      owner: p.phone,
-      name: p.name,
-      ownerName: p.name,
-      avatar: p.avatar,
-      peerId: p.peerId,
-      vehicleType: p.vehicleType,
+      vehicle: p.vehicle, phone: p.phone, owner: p.phone,
+      name: p.name, ownerName: p.name, avatar: p.avatar,
+      peerId: p.peerId, vehicleType: p.vehicleType,
       lat: p.lat === '' ? '' : Number(p.lat),
       lng: p.lng === '' ? '' : Number(p.lng),
       lastSeen: Number(p.lastSeen),
@@ -1515,7 +1368,6 @@ H.startTrip = function (b, u) {
   rateLimit(['trip:' + u.phone], 30, 3600);
   const d = b.data || b;
 
-  // Prevent duplicate active trips
   const active = readAll('trips').filter(function (t) {
     return t.phone === u.phone && t.status === 'active';
   });
@@ -1525,14 +1377,10 @@ H.startTrip = function (b, u) {
 
   const id = shortId('t');
   appendRow('trips', {
-    id: id,
-    phone: u.phone,
+    id: id, phone: u.phone,
     laneId: isId(d.laneId) ? d.laneId : '',
     driverPhone: isPhone(d.driverPhone) ? d.driverPhone : '',
-    startTs: now(),
-    endTs: '',
-    distance: '',
-    fare: '',
+    startTs: now(), endTs: '', distance: '', fare: '',
     status: 'active',
     notes: clean(d.startLat, 20) + ',' + clean(d.startLng, 20)
   });
@@ -1551,21 +1399,12 @@ H.endTrip = function (b, u) {
   if (!trip) throw new ApiError('not_found');
 
   const fare = toNum(b.fare, 0, 100000, 0);
-  const distance = toNum(b.distanceKm, 0, 5000000, 0);
+  const distance = toNum(b.distanceKm || b.distance, 0, 5000000, 0);
 
   updateRow('trips', trip._row, {
-    endTs: now(),
-    distance: distance,
-    fare: fare,
-    status: 'completed',
-    notes: clean(b.notes, 500)
+    endTs: now(), distance: distance, fare: fare,
+    status: 'completed', notes: clean(b.notes, 500)
   });
-
-  const driver = isPhone(trip.driverPhone) ? findUser(trip.driverPhone) : null;
-  if (driver && u.email) {
-    const rateUrl = APP_URL + '?rate=' + trip.id;
-    try { sendRateRequestEmail(u.email, driver.name, rateUrl); } catch (e) {}
-  }
 
   return { ok: true };
 };
@@ -1575,86 +1414,16 @@ H.myTrips = function (b, u) {
   trips.sort(function (a, c) { return Number(c.startTs) - Number(a.startTs); });
   return trips.slice(0, 100).map(function (t) {
     return {
-      id: t.id,
-      status: t.status,
+      id: t.id, status: t.status,
       startedAt: t.startTs ? new Date(Number(t.startTs)).toISOString() : '',
       endedAt: t.endTs ? new Date(Number(t.endTs)).toISOString() : '',
-      distanceKm: t.distance || '',
-      fare: t.fare || '',
+      distanceKm: t.distance || '', fare: t.fare || '',
       createdAt: t.startTs ? new Date(Number(t.startTs)).toISOString() : ''
     };
   });
 };
 
-// ─── Ratings ───
-H.rateTrip = function (b, u) {
-  const tripId = String(b.tripId || '');
-  const stars = Math.round(toNum(b.stars, 1, 5, 5));
-  const comment = clean(b.comment, 500);
-
-  const trips = readAll('trips');
-  let trip = null;
-  for (let i = 0; i < trips.length; i++) {
-    if (trips[i].id === tripId && trips[i].phone === u.phone) {
-      trip = trips[i];
-      break;
-    }
-  }
-  if (!trip) throw new ApiError('not_found');
-
-  const already = readAll('ratings').filter(function (r) {
-    return r.tripId === tripId && r.fromPhone === u.phone;
-  });
-  if (already.length) throw new ApiError('already_rated');
-
-  appendRow('ratings', {
-    id: shortId('r'),
-    tripId: tripId,
-    fromPhone: u.phone,
-    toPhone: trip.driverPhone,
-    stars: stars,
-    comment: comment,
-    ts: now()
-  });
-
-  if (trip.driverPhone && isPhone(trip.driverPhone)) {
-    const target = findUser(trip.driverPhone);
-    if (target) {
-      updateRow('users', target._row, {
-        ratingSum: Number(target.ratingSum || 0) + stars,
-        ratingCount: Number(target.ratingCount || 0) + 1
-      });
-    }
-  }
-  return { ok: true };
-};
-
-// ─── Reports ───
-H.reportUser = function (b, u) {
-  rateLimit(['report:' + u.phone], 5, 3600);
-  const targetVehicle = normVehicle(b.vehicle);
-  const reason = clean(b.reason, 60);
-  const detail = clean(b.detail, 500);
-  if (!reason) throw new ApiError('bad_reason');
-
-  const target = findUserByVehicle(targetVehicle);
-  appendRow('reports', {
-    id: shortId('rep'),
-    reporterPhone: u.phone,
-    targetPhone: target ? target.phone : '',
-    targetVehicle: targetVehicle,
-    reason: reason,
-    detail: detail,
-    status: 'open',
-    ts: now(),
-    resolvedAt: ''
-  });
-
-  try { sendReportAckEmail(u.email); } catch (e) {}
-  return { ok: true };
-};
-
-// ─── Points (Saved map locations) ───
+// ─── Points ───
 H.savePoint = function (b, u) {
   const r = b.row || b;
   const lat = coord(r.lat, 90);
@@ -1667,19 +1436,13 @@ H.savePoint = function (b, u) {
   const id = shortId('P');
   const ts = now();
   appendRow('points', {
-    id: id,
-    ownerPhone: u.phone,
-    ownerName: u.name,
+    id: id, ownerPhone: u.phone, ownerName: u.name,
     label: clean(r.label || r.name, 80) || 'Saved point',
-    note: clean(r.note, 200),
-    category: clean(r.category, 30),
-    lat: lat,
-    lng: lng,
+    note: clean(r.note, 200), category: clean(r.category, 30),
+    lat: lat, lng: lng,
     shared: r.shared === true || r.shared === 'true' ? 'true' : 'false',
-    createdAt: ts,
-    updatedAt: ts
+    createdAt: ts, updatedAt: ts
   });
-
   return { id: id, ok: true };
 };
 
@@ -1688,14 +1451,9 @@ H.myPoints = function (b, u) {
   points.sort(function (a, c) { return Number(c.createdAt) - Number(a.createdAt); });
   return points.map(function (p) {
     return {
-      id: p.id,
-      label: p.label,
-      note: p.note,
-      category: p.category,
-      lat: Number(p.lat),
-      lng: Number(p.lng),
-      shared: p.shared === 'true',
-      mine: true
+      id: p.id, label: p.label, note: p.note, category: p.category,
+      lat: Number(p.lat), lng: Number(p.lng),
+      shared: p.shared === 'true', mine: true
     };
   });
 };
@@ -1705,14 +1463,9 @@ H.listPoints = function (b, u) {
   points.sort(function (a, c) { return Number(c.createdAt) - Number(a.createdAt); });
   return points.slice(0, 500).map(function (p) {
     return {
-      id: p.id,
-      label: p.label,
-      note: p.note,
-      category: p.category,
-      lat: Number(p.lat),
-      lng: Number(p.lng),
-      ownerName: p.ownerName,
-      shared: true,
+      id: p.id, label: p.label, note: p.note, category: p.category,
+      lat: Number(p.lat), lng: Number(p.lng),
+      ownerName: p.ownerName, shared: true,
       mine: !!u && p.ownerPhone === u.phone
     };
   });
@@ -1756,9 +1509,6 @@ H.uploadImage = function (b, u) {
 
   const mime = 'image/' + m[1];
   const slot = String(b.folder || 'misc').split('/').pop();
-  if (PHOTO_SLOTS.indexOf(slot) === -1) {
-    // Allow but default to misc
-  }
 
   const bytes = Utilities.base64Decode(m[2]);
   const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
@@ -1777,9 +1527,7 @@ H.uploadImage = function (b, u) {
 
 H.deleteImage = function (b, u) {
   const id = String(b.fileId || '');
-  if (!isId(id) || !fileOwnedBy(id, ownerTag(u.phone))) {
-    throw new ApiError('forbidden');
-  }
+  if (!isId(id) || !fileOwnedBy(id, ownerTag(u.phone))) throw new ApiError('forbidden');
   DriveApp.getFileById(id).setTrashed(true);
   return { ok: true };
 };
@@ -1796,58 +1544,57 @@ const ROUTES = {
   checkSession:       { auth: 'optional' },
   listLanes:          { auth: 'optional' },
   listHive:           { auth: 'optional' },
-
   logout:             { auth: 'required', write: true },
   getMe:              { auth: 'required' },
   updateMe:           { auth: 'required', write: true },
   setPassword:        { auth: 'required', write: true },
   becomeAgent:        { auth: 'required', write: true },
-
   insertLane:         { auth: 'required', write: true },
   updateLane:         { auth: 'required', write: true },
   removeLane:         { auth: 'required', write: true },
-
   insertHive:         { auth: 'required', write: true },
   updateHive:         { auth: 'required', write: true },
   deleteHive:         { auth: 'required', write: true },
   like:               { auth: 'required', write: true },
-
   getMessages:        { auth: 'required' },
   sendMessage:        { auth: 'required', write: true },
-
   updatePresence:     { auth: 'required', write: true },
   activeVehicles:     { auth: 'optional' },
   removePresence:     { auth: 'required', write: true },
-
   startTrip:          { auth: 'required', write: true },
   endTrip:            { auth: 'required', write: true },
   myTrips:            { auth: 'required' },
-  rateTrip:           { auth: 'required', write: true },
-  reportUser:         { auth: 'required', write: true },
-
   savePoint:          { auth: 'required', write: true },
   myPoints:           { auth: 'required' },
   listPoints:         { auth: 'optional' },
   deletePoint:        { auth: 'required', write: true },
-
   uploadImage:        { auth: 'required', write: true },
   deleteImage:        { auth: 'required', write: true },
-
   adminPendingAgents: { auth: 'required' },
   adminApproveAgent:  { auth: 'required', write: true },
   adminRejectAgent:   { auth: 'required', write: true },
-
   debug:              { auth: 'required' }
 };
 
 function out(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
+    .setMimeType(ContentService.MimeType.JSON)
+    .setHeader('Access-Control-Allow-Origin', '*')
+    .setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+    .setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
 function doGet() {
   return out({ ok: true, service: 'steeradar', version: VERSION });
+}
+
+function doOptions(e) {
+  return ContentService.createTextOutput('')
+    .setMimeType(ContentService.MimeType.TEXT)
+    .setHeader('Access-Control-Allow-Origin', '*')
+    .setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+    .setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
 function doPost(e) {
@@ -1871,11 +1618,9 @@ function doPost(e) {
       if (route.auth === 'required') user = requireUser(body);
       else if (route.auth === 'optional') user = userByToken(body);
 
-      // Admin guard for admin actions
       if (action.indexOf('admin') === 0) {
         if (!isAdmin_(user)) throw new ApiError('forbidden', 'Admin access required');
       }
-
       return H[action](body, user);
     };
 
@@ -1897,7 +1642,7 @@ function doPost(e) {
 // ─── Setup ───
 function setup() {
   pepper();
-  Object.keys(SCHEMA).forEach(getSheet);
+  Object.keys(SCHEMA).forEach(migrateSheet);
   installTriggers();
 
   Logger.log('============================================');
@@ -1950,14 +1695,7 @@ function testEmail() {
 
 function testWelcome() {
   const to = Session.getActiveUser().getEmail();
-  const ok = sendWelcomeEmail(
-    to,
-    'Test Rider',
-    'KA01AB1234',
-    'Indiranagar',
-    '9876543210',
-    to
-  );
+  const ok = sendWelcomeEmail(to, 'Test Rider', 'KA01AB1234', 'Indiranagar', '9876543210', to);
   Logger.log('Welcome email: ' + (ok ? 'OK' : 'FAILED'));
 }
 
