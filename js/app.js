@@ -1,14 +1,9 @@
 /**
  * ============================================================================
- * STEERADAR FRONTEND CONTROLLER (v10.0)
+ * STEERADAR FRONTEND CONTROLLER (v10.1)
  * ============================================================================
- * Complete client: auth, lanes, hive, chat, neighborhood chat, trips,
- * live presence, admin panel, map integration, logger, and PWA.
- * 
- * DEPENDENCIES:
- *   js/api.js     - Backend gateway
- *   js/map.js     - MapLibre GL wrapper (v10.0)
- *   js/logger.js  - In-app logger
+ * Fix: OTP timeout handling — opens OTP modal even when request times out,
+ * because GAS takes 10-15s to send email.
  * ============================================================================
  */
 
@@ -79,13 +74,12 @@ const DOM = {
 document.addEventListener('DOMContentLoaded', async () => {
     logger.init();
 
-    console.log('%c SteerRadar v10.0 booted ',
+    console.log('%c SteerRadar v10.1 booted ',
         'background:#00d4a0;color:#000;font-weight:800;padding:4px 10px;border-radius:4px;');
 
     setupEventListeners();
     setupNetworkHandlers();
     setupVisibilityHandlers();
-    setupPWAInstallPrompt();
     setupLogoLongPress();
     initMap();
 
@@ -257,6 +251,9 @@ async function handleSignIn(e) {
     }
 }
 
+// ============================================================================
+// SIGNUP STEP 1 — Send OTP with timeout-aware handling
+// ============================================================================
 async function handleSignupStep1(e) {
     e.preventDefault();
     const data = {
@@ -282,17 +279,41 @@ async function handleSignupStep1(e) {
     const res = await api.sendOtp(data.phone, data.email, 'register');
     resetButton(btn, 'Send OTP');
 
+    // Handle timeout/abort gracefully — the OTP email is likely already on its way
+    const lastErr = api.lastError || '';
+    const timedOut = lastErr.includes('Timed out') ||
+                     lastErr.includes('aborted') ||
+                     lastErr.includes('Failed to fetch');
+
     if (res && res.ok) {
         document.getElementById('otp-message').textContent =
             `Enter the 6-digit code sent to ${res.sentTo || data.email}`;
         openModal('otp-modal');
         setTimeout(() => document.getElementById('otp-code')?.focus(), 300);
+    } else if (res && res.error === 'cooldown') {
+        // OTP was recently sent — let user enter the code
+        document.getElementById('otp-message').textContent =
+            `An OTP was recently sent to ${data.email}. Enter the 6-digit code here.`;
+        openModal('otp-modal');
+        setTimeout(() => document.getElementById('otp-code')?.focus(), 300);
+    } else if (res && res.error === 'phone_exists') {
+        showToast('This phone number is already registered. Please sign in.', 'warning');
+    } else if (res && res.error === 'email_taken') {
+        showToast('This email is already registered. Please sign in.', 'warning');
+    } else if (timedOut) {
+        // Network timed out — email probably went through anyway
+        document.getElementById('otp-message').textContent =
+            `If you received a code at ${data.email}, enter it below. (Check spam folder too.)`;
+        openModal('otp-modal');
+        setTimeout(() => document.getElementById('otp-code')?.focus(), 300);
     } else {
-        const errMsg = (res && res.error) || api.lastError || 'Failed to send OTP';
-        showToast(errMsg, 'error');
+        showToast((res && res.error) || lastErr || 'Failed to send OTP', 'error');
     }
 }
 
+// ============================================================================
+// VERIFY OTP
+// ============================================================================
 window.verifyOTP = async () => {
     const code = document.getElementById('otp-code').value.trim();
     if (!code || code.length !== 6) return showToast('Enter a valid 6-digit code', 'warning');
@@ -304,9 +325,11 @@ window.verifyOTP = async () => {
     const verifyRes = await api.verifyOtp(state.signupData.phone, code);
     if (!verifyRes || !verifyRes.ok) {
         resetButton(btn, 'Verify & Create Account');
-        return showToast('Invalid OTP', 'error');
+        const errMsg = (verifyRes && verifyRes.error) || api.lastError || 'Invalid OTP';
+        return showToast(errMsg, 'error');
     }
 
+    setButtonLoading(btn, 'Creating account...');
     const regRes = await api.register(state.signupData);
     resetButton(btn, 'Verify & Create Account');
 
@@ -505,7 +528,6 @@ function createLaneCardHTML(lane) {
     const progress = Math.min((seats / maxSeats) * 100, 100);
     const color = seats > 5 ? 'var(--primary)' : (seats > 2 ? 'var(--warning)' : 'var(--danger)');
 
-    // Calculate distance from user (if we have their location)
     let distanceHTML = '';
     if (state.userLocation && lane.lat && lane.lng) {
         const km = mapModule.calculateDistance(state.userLocation.lat, state.userLocation.lng, lane.lat, lane.lng);
@@ -569,7 +591,6 @@ window.requestSeat = (laneId) => {
 window.showLaneOnMap = async (laneId) => {
     const lane = state.lanes.find(l => l.id === laneId);
     if (!lane) return showToast('Lane not found', 'error');
-
     if (!lane.lat || !lane.lng) return showToast('No location available', 'warning');
 
     switchTab('map');
@@ -795,16 +816,13 @@ function getNeighborhoodRoomId() {
 
 window.openNeighborhoodChat = async () => {
     if (!state.user) return showToast('Please sign in first', 'error');
-
     showToast('Finding riders near you...', 'info');
-
     try {
         const loc = await mapModule.locateUser();
         state.userLocation = loc;
     } catch (e) {
         console.warn('Using default location for neighborhood chat:', e);
     }
-
     const roomId = getNeighborhoodRoomId();
     openChat(roomId, '🏘️ Neighborhood Chat');
 };
@@ -814,7 +832,6 @@ window.openNeighborhoodChat = async () => {
 // ============================================================================
 window.handleFABClick = () => {
     if (!state.user) return showToast('Please sign in first', 'error');
-
     if (state.activeTab === 'lanes') {
         if (state.user.role !== 'agent') {
             return showToast('Only SteerAgents can create lanes. Apply in Profile.', 'warning');
@@ -1092,7 +1109,7 @@ window.handleAdminAction = async (uid, approve) => {
 // ============================================================================
 function initMap() {
     mapModule.init('map', handleMapClick);
-    // Get initial user location silently for distance calcs
+
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
             (pos) => {
@@ -1490,48 +1507,7 @@ function skeletonCards(count) {
 }
 
 // ============================================================================
-// 30. PWA INSTALL PROMPT
-// ============================================================================
-function setupPWAInstallPrompt() {
-    let deferredPrompt = null;
-
-    window.addEventListener('beforeinstallprompt', (e) => {
-        e.preventDefault();
-        deferredPrompt = e;
-
-        setTimeout(() => {
-            if (!document.getElementById('pwa-install-btn') && deferredPrompt) {
-                const btn = document.createElement('button');
-                btn.id = 'pwa-install-btn';
-                btn.className = 'btn btn-primary';
-                btn.style.cssText = `
-                    position:fixed; bottom:180px; right:20px; z-index:200;
-                    box-shadow: 0 8px 24px rgba(0,212,160,0.5);
-                    padding: 10px 16px; font-size: 13px;
-                `;
-                btn.innerHTML = '<i class="fas fa-download"></i> Install App';
-                btn.onclick = async () => {
-                    if (!deferredPrompt) return;
-                    deferredPrompt.prompt();
-                    const { outcome } = await deferredPrompt.userChoice;
-                    console.log('[PWA] Install outcome:', outcome);
-                    deferredPrompt = null;
-                    btn.remove();
-                };
-                document.body.appendChild(btn);
-                setTimeout(() => btn.remove(), 30000);
-            }
-        }, 3000);
-    });
-
-    window.addEventListener('appinstalled', () => {
-        showToast('SteerRadar installed! 🎉', 'success');
-        document.getElementById('pwa-install-btn')?.remove();
-    });
-}
-
-// ============================================================================
-// 31. GLOBAL EXPORTS
+// 30. GLOBAL EXPORTS
 // ============================================================================
 window.toggleGhostMode = () => {
     const checkbox = document.getElementById('toggle-ghost-mode');
