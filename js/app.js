@@ -1689,5 +1689,5 @@ window.toggleGhostMode = () => {
 };
 
 window.logger = logger;
-
+window.mapModule = mapModule;
 console.log('[app] All handlers initialized');
