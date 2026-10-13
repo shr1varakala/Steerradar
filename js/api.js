@@ -77,11 +77,13 @@ export const api = {
 
     try {
       const res = await fetch(this.url, {
-        method: 'POST',
-        signal: ctrl.signal,
-        body: JSON.stringify(body),
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      });
+  method: 'POST',
+  redirect: 'follow', 
+  mode: 'cors',   
+  signal: ctrl.signal,
+  body: JSON.stringify(body),
+  headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+});
 
       const text = await res.text();
       let data;
