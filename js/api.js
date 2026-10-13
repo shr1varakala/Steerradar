@@ -190,9 +190,35 @@ export const api = {
   // --------------------------------------------------------------------------
   // PRESENCE
   // --------------------------------------------------------------------------
-  updatePresence(row) { return this.call('updatePresence', { row }); },
-  activeVehicles() { return this.list('activeVehicles'); },
-  removePresence() { return this.call('removePresence'); },
+  async updatePresence(row) {
+  if (!this.url) return null;
+  const body = { action: 'updatePresence', row };
+  if (this.phone) body.phone = this.phone;
+  if (this.token) body.token = this.token;
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+
+  try {
+    const res = await fetch(this.url, {
+      method: 'POST',
+      signal: ctrl.signal,
+      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch (e) { throw new Error('Server returned non-JSON'); }
+    if (data.error) throw new Error(data.message || data.error);
+    return data.data;
+  } catch (e) {
+    console.warn('[api] updatePresence ->', e.message);
+    return null; // silent fail — presence is best-effort
+  } finally {
+    clearTimeout(timer);
+  }
+},
 
   // --------------------------------------------------------------------------
   // TRIPS
