@@ -1244,3 +1244,232 @@ a:focus-visible {
     .stories-container { max-width: 600px; margin-left: auto; margin-right: auto; }
     #trips-list { max-width: 600px; margin-left: auto; margin-right: auto; }
 }
+
+/* ============================================================================
+   MAP SEARCH + CONTROLS (v11.0)
+   ============================================================================ */
+
+/* --- SEARCH BAR --- */
+.map-search-bar {
+    position: absolute;
+    top: calc(70px + var(--safe-top));
+    left: 20px;
+    right: 70px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-glass);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 10px 16px;
+    z-index: 20;
+    box-shadow: var(--shadow-lg);
+}
+
+.map-search-bar i.fa-search {
+    color: var(--text-sub);
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.map-search-bar input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-main);
+    font-size: 14px;
+    font-family: inherit;
+    min-width: 0;
+}
+
+.map-search-bar input::placeholder {
+    color: var(--text-muted);
+}
+
+.map-search-clear {
+    background: var(--bg-card);
+    border: none;
+    color: var(--text-sub);
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 11px;
+    flex-shrink: 0;
+    transition: var(--transition-fast);
+}
+.map-search-clear:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-main);
+}
+
+/* --- SEARCH RESULTS --- */
+.map-search-results {
+    position: absolute;
+    top: calc(130px + var(--safe-top));
+    left: 20px;
+    right: 20px;
+    max-height: 320px;
+    overflow-y: auto;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    z-index: 21;
+    box-shadow: var(--shadow-lg);
+    animation: fadeInUp 0.2s ease;
+}
+
+.search-result {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    border-bottom: 1px solid var(--border-subtle);
+}
+.search-result:last-child { border-bottom: none; }
+.search-result:hover { background: var(--bg-card); }
+.search-result i {
+    color: var(--primary);
+    font-size: 14px;
+    margin-top: 3px;
+    flex-shrink: 0;
+}
+.search-result-info { flex: 1; min-width: 0; }
+.search-result-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.search-result-sub {
+    font-size: 11px;
+    color: var(--text-sub);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.search-loading, .search-empty {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-sub);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+/* --- COMPASS / RECENTER BUTTON --- */
+.map-compass {
+    position: absolute;
+    top: calc(70px + var(--safe-top));
+    right: 20px;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: var(--primary);
+    box-shadow: var(--shadow-md);
+    z-index: 20;
+    cursor: pointer;
+    transition: transform var(--transition-bounce);
+}
+.map-compass:hover { transform: scale(1.08); }
+.map-compass:active { transform: scale(0.92); }
+
+/* --- MY LOCATION BUTTON --- */
+.map-my-location {
+    position: absolute;
+    top: calc(126px + var(--safe-top));
+    right: 20px;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: var(--info);
+    box-shadow: var(--shadow-md);
+    z-index: 20;
+    cursor: pointer;
+    transition: transform var(--transition-bounce);
+}
+.map-my-location:hover { transform: scale(1.08); color: var(--primary); }
+.map-my-location:active { transform: scale(0.92); }
+
+/* --- TRIP BANNER (Pickup route) --- */
+.map-trip-banner {
+    position: absolute;
+    top: calc(70px + var(--safe-top));
+    left: 20px;
+    right: 20px;
+    background: linear-gradient(135deg, #00d4a0 0%, #00b88a 100%);
+    border-radius: var(--radius-lg);
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    z-index: 22;
+    box-shadow: 0 8px 24px rgba(0, 212, 160, 0.4);
+    animation: slideDown 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+@keyframes slideDown {
+    from { transform: translateY(-30px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.trip-banner-info { flex: 1; min-width: 0; }
+.trip-banner-title {
+    font-size: 14px;
+    font-weight: 800;
+    color: #000;
+    margin-bottom: 2px;
+}
+.trip-banner-sub {
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.7);
+    font-weight: 600;
+}
+
+.map-trip-banner .btn-danger {
+    background: rgba(0, 0, 0, 0.25);
+    color: #000;
+    border: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.map-trip-banner .btn-danger:hover {
+    background: rgba(0, 0, 0, 0.4);
+}
