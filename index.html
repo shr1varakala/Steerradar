@@ -1,51 +1,29 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>SteerRadar · Community Ride Network</title>
-    
-    <!-- PWA Manifest (optional, but harmless) -->
+    <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#00d4a0">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="SteerRadar">
-    
-    <!-- Favicon (Raw GitHub URL) -->
     <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steeradar-logo.png">
     <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steeradar-logo.png">
-    
-    <!-- FontAwesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <!-- Leaflet Map CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    
-    <!-- MapLibre GL (for keyless vector dark map) -->
-    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.css">
-    
-    <!-- Main Stylesheet -->
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-    <!-- ================= MAIN APP CONTAINER ================= -->
     <div id="app-container">
 
-        <!-- HEADER -->
         <header id="main-header">
-            <!-- Logo — long press (800ms) opens log viewer -->
-            <div class="logo-text" id="logo-trigger" title="Long-press for logs">
-                <img 
-                    src="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steeradar-logo.png" 
-                    alt="SteerRadar" 
-                    class="brand-logo"
-                    style="height: 36px; width: auto; max-width: 140px; object-fit: contain; display: block;"
-                    onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
-                >
-                <span class="brand-fallback" style="display:none;">
-                    <i class="fas fa-satellite-dish"></i> SteerRadar
-                </span>
+            <div class="logo-text" id="logo-trigger">
+                <img src="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steeradar-logo.png" alt="SteerRadar" class="brand-logo"
+                    onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                <span class="brand-fallback" style="display:none;"><i class="fas fa-satellite-dish"></i> SteerRadar</span>
             </div>
             <div class="header-actions">
                 <button id="admin-panel-btn" class="hidden btn btn-secondary btn-sm" onclick="openModal('admin-modal')">
@@ -56,22 +34,17 @@
             </div>
         </header>
 
-        <!-- MAIN VIEWS -->
         <main>
-            <!-- 1. LANES VIEW (Live Drivers) -->
             <section id="view-lanes" class="view-section active">
                 <div class="section-header flex justify-between align-center">
                     <div>
                         <h2 class="section-title">Live Drivers</h2>
                         <p class="text-sub">Real-time community updates</p>
                     </div>
-                    <button class="btn btn-secondary btn-sm">
-                        <i class="fas fa-filter"></i> All Lanes
-                    </button>
+                    <button class="btn btn-secondary btn-sm"><i class="fas fa-filter"></i> All Lanes</button>
                 </div>
             </section>
 
-            <!-- 2. HIVE VIEW (Community Feed) -->
             <section id="view-hive" class="view-section">
                 <div class="hive-header">
                     <h2 class="hive-title">Hive</h2>
@@ -79,26 +52,11 @@
                 </div>
 
                 <div class="stories-container">
-                    <div class="story-item">
-                        <div class="story-avatar story-add"><i class="fas fa-plus"></i></div>
-                        <span class="story-name">Your story</span>
-                    </div>
-                    <div class="story-item">
-                        <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=5" alt="Ananya"></div>
-                        <span class="story-name">Ananya</span>
-                    </div>
-                    <div class="story-item">
-                        <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=8" alt="Rohit"></div>
-                        <span class="story-name">Rohit</span>
-                    </div>
-                    <div class="story-item">
-                        <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=9" alt="Meera"></div>
-                        <span class="story-name">Meera</span>
-                    </div>
-                    <div class="story-item">
-                        <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=15" alt="Arjun"></div>
-                        <span class="story-name">Arjun</span>
-                    </div>
+                    <div class="story-item"><div class="story-avatar story-add"><i class="fas fa-plus"></i></div><span class="story-name">Your story</span></div>
+                    <div class="story-item"><div class="story-avatar"><img src="https://i.pravatar.cc/150?img=5" alt="Ananya"></div><span class="story-name">Ananya</span></div>
+                    <div class="story-item"><div class="story-avatar"><img src="https://i.pravatar.cc/150?img=8" alt="Rohit"></div><span class="story-name">Rohit</span></div>
+                    <div class="story-item"><div class="story-avatar"><img src="https://i.pravatar.cc/150?img=9" alt="Meera"></div><span class="story-name">Meera</span></div>
+                    <div class="story-item"><div class="story-avatar"><img src="https://i.pravatar.cc/150?img=15" alt="Arjun"></div><span class="story-name">Arjun</span></div>
                 </div>
 
                 <div class="post-card greeting-card">
@@ -112,9 +70,7 @@
                     </div>
                 </div>
 
-                <button class="btn btn-secondary w-full mb-3" 
-                        onclick="openNeighborhoodChat()" 
-                        style="border-color: var(--primary); justify-content: flex-start; padding: 14px 18px;">
+                <button class="btn btn-secondary w-full mb-3" onclick="openNeighborhoodChat()" style="border-color: var(--primary); justify-content: flex-start; padding: 14px 18px;">
                     <i class="fas fa-map-marked-alt" style="color: var(--primary); font-size: 18px;"></i>
                     <div style="text-align: left; flex: 1; margin-left: 12px;">
                         <div style="font-weight: 700; font-size: 14px;">Neighborhood Chat</div>
@@ -126,74 +82,67 @@
                 <h3 class="section-subtitle">Local posts</h3>
             </section>
 
-            <!-- 3. MAP VIEW -->
-<section id="view-map" class="view-section">
-    <div id="map-container">
-        <div id="map"></div>
+            <!-- MAP VIEW -->
+            <section id="view-map" class="view-section">
+                <div id="map-container">
+                    <div id="map"></div>
 
-        <!-- SEARCH BAR -->
-        <div class="map-search-bar">
-            <i class="fas fa-search"></i>
-            <input type="text" id="map-search-input" placeholder="Search places, area, landmark..." autocomplete="off">
-            <button id="map-search-clear" class="map-search-clear hidden" onclick="mapModule.clearSearch()">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
+                    <!-- SEARCH BAR -->
+                    <div class="map-search-bar">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="map-search-input" placeholder="Search places, area, landmark..." autocomplete="off">
+                        <button id="map-search-clear" class="map-search-clear hidden" onclick="mapModule.clearSearch()">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
 
-        <!-- SEARCH RESULTS DROPDOWN -->
-        <div id="map-search-results" class="map-search-results hidden"></div>
+                    <!-- FILTER CHIPS -->
+                    <div class="map-chips">
+                        <button class="map-chip active" onclick="setMapFilter('live', this)">⚡ Live now</button>
+                        <button class="map-chip" onclick="setMapFilter('all', this)">All</button>
+                        <button class="map-chip" onclick="setMapFilter('seats', this)">Has seats</button>
+                        <button class="map-chip" onclick="setMapFilter('mine', this)">My lanes</button>
+                    </div>
 
-        <!-- COMPASS / RECENTER BUTTON -->
-        <button class="map-compass" onclick="mapModule.recenter()" title="Recenter to my location">
-            <i class="fas fa-location-arrow"></i>
-        </button>
+                    <!-- SEARCH RESULTS -->
+                    <div id="map-search-results" class="map-search-results hidden"></div>
 
-        <!-- MY LOCATION BUTTON -->
-        <button class="map-my-location" onclick="mapModule.locateUser(true)" title="My live location">
-            <i class="fas fa-crosshairs"></i>
-        </button>
+                    <!-- RIGHT-SIDE CONTROL STACK -->
+                    <div class="map-controls-stack">
+                        <button class="map-ctrl-btn" onclick="mapModule.recenter()" title="Recenter">
+                            <i class="fas fa-location-arrow"></i>
+                        </button>
+                        <button class="map-ctrl-btn" onclick="mapModule.locateUser(true)" title="My location">
+                            <i class="fas fa-crosshairs"></i>
+                        </button>
+                        <button id="ctrl-alert" class="map-ctrl-btn hidden" onclick="openModal('report-modal')" title="Report">
+                            <i class="fas fa-exclamation-triangle"></i>
+                        </button>
+                        <button id="ctrl-ghost" class="map-ctrl-btn hidden" onclick="toggleGhostMode()" title="Ghost mode">
+                            <i class="fas fa-ghost"></i>
+                        </button>
+                        <button id="ctrl-trip" class="map-ctrl-btn hidden" onclick="toggleTrip()" title="Trip">
+                            <i class="fas fa-play"></i>
+                        </button>
+                    </div>
 
-        <!-- ACTIVE TRIP BANNER (visible when navigating to a pickup) -->
-        <div id="map-trip-banner" class="map-trip-banner hidden">
-            <div class="trip-banner-info">
-                <div class="trip-banner-title" id="trip-banner-title">Heading to pickup</div>
-                <div class="trip-banner-sub" id="trip-banner-sub">-- km away</div>
-            </div>
-            <button class="btn btn-danger btn-sm" onclick="mapModule.cancelRoute()">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
+                    <!-- TRIP BANNER -->
+                    <div id="map-trip-banner" class="map-trip-banner hidden">
+                        <div class="trip-banner-info">
+                            <div class="trip-banner-title" id="trip-banner-title">Heading to pickup</div>
+                            <div class="trip-banner-sub" id="trip-banner-sub">-- km away</div>
+                        </div>
+                        <button class="btn btn-danger btn-sm" onclick="mapModule.cancelRoute()"><i class="fas fa-times"></i></button>
+                    </div>
+                </div>
+            </section>
 
-        <!-- SteerAgent Map Controls (visible only to agents) -->
-        <div id="steer-agent-controls" class="map-overlay-controls hidden">
-            <button class="btn-primary btn-circle" onclick="openModal('report-modal')" title="Report Alert">
-                <i class="fas fa-exclamation-triangle"></i>
-            </button>
-            <button class="btn-secondary btn-circle" onclick="toggleGhostMode()" title="Ghost Mode">
-                <i class="fas fa-ghost"></i>
-            </button>
-        </div>
-
-        <!-- Trip Controls (SteerAgent Only) -->
-        <div id="trip-controls" class="map-overlay-controls hidden">
-            <button id="trip-btn" class="btn-primary btn-circle" onclick="toggleTrip()" title="Start/End Trip">
-                <i class="fas fa-play"></i>
-            </button>
-        </div>
-    </div>
-</section>
-            
-                        
-
-            <!-- 4. PROFILE VIEW -->
             <section id="view-profile" class="view-section">
                 <div class="profile-header">
                     <img src="https://i.pravatar.cc/150?img=11" class="profile-avatar" id="profile-avatar-img">
                     <h2 id="profile-name-display" class="profile-name">Loading...</h2>
                     <p id="profile-role-display" class="profile-role">RearAgent</p>
-                    <button class="btn btn-secondary btn-sm mt-2" onclick="openEditProfile()">
-                        <i class="fas fa-edit"></i> Edit Profile
-                    </button>
+                    <button class="btn btn-secondary btn-sm mt-2" onclick="openEditProfile()"><i class="fas fa-edit"></i> Edit Profile</button>
                 </div>
 
                 <div id="become-steer-agent-section" class="post-card upgrade-card hidden">
@@ -204,7 +153,24 @@
 
                 <div id="steer-agent-pending-section" class="post-card pending-card hidden">
                     <h3 class="pending-title">Application Under Review</h3>
-                    <p class="text-sub text-white">Your documents are being validated by an Admin. Check your email for updates.</p>
+                    <p class="text-sub">Your documents are being validated by an Admin. Check your email for updates.</p>
+                </div>
+
+                <div class="post-card">
+                    <h3 class="section-subtitle">Appearance</h3>
+                    <div class="setting-row">
+                        <div>
+                            <span style="font-weight:600;">Theme</span>
+                            <p class="text-sub" style="font-size:11px; margin-top:2px;">Choose light or dark</p>
+                        </div>
+                        <label class="theme-switch">
+                            <input type="checkbox" id="toggle-theme" onchange="handleThemeToggle(this)">
+                            <span class="theme-slider">
+                                <i class="fas fa-sun theme-icon-light"></i>
+                                <i class="fas fa-moon theme-icon-dark"></i>
+                            </span>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="post-card">
@@ -223,54 +189,35 @@
                     </div>
                 </div>
 
-                <button class="btn btn-secondary w-full mt-3" onclick="openModal('trips-modal')">
-                    <i class="fas fa-route"></i> My Trips
-                </button>
-
-                <!-- Debug: manual log access -->
-                <button class="btn btn-secondary w-full mt-3" onclick="openModal('log-modal')">
-                    <i class="fas fa-bug"></i> View Debug Log
-                </button>
-
+                <button class="btn btn-secondary w-full mt-3" onclick="openModal('trips-modal')"><i class="fas fa-route"></i> My Trips</button>
+                <button class="btn btn-secondary w-full mt-3" onclick="openModal('log-modal')"><i class="fas fa-bug"></i> View Debug Log</button>
                 <button class="btn btn-secondary w-full mt-4" onclick="handleLogout()">Log Out</button>
             </section>
         </main>
 
-        <!-- BOTTOM NAVIGATION -->
         <nav id="bottom-nav">
             <button onclick="switchTab('lanes')" class="active" id="nav-lanes"><i class="fas fa-bus"></i> Lanes</button>
             <button onclick="switchTab('hive')" id="nav-hive"><i class="fas fa-comments"></i> Hive</button>
-            
-            <button id="fab-create" class="fab" onclick="handleFABClick()">
-                <i class="fas fa-plus"></i>
-            </button>
-            
+            <button id="fab-create" class="fab" onclick="handleFABClick()"><i class="fas fa-plus"></i></button>
             <button onclick="switchTab('map')" id="nav-map"><i class="fas fa-map"></i> Map</button>
             <button onclick="switchTab('profile')" id="nav-profile"><i class="fas fa-user"></i> Profile</button>
         </nav>
 
-        <!-- CHAT OVERLAY -->
         <div id="hive-chat-view" class="hidden">
             <header class="chat-header">
                 <button onclick="closeChat()" class="icon-btn"><i class="fas fa-arrow-left"></i></button>
                 <h3 id="chat-room-title" class="chat-title">Hive Chat</h3>
             </header>
-
             <div id="chat-messages-container" class="chat-container"></div>
-
             <div class="chat-input-area">
-                <button id="request-payment-btn" class="btn-primary btn-circle btn-sm" title="Request UPI Payment">
-                    <i class="fas fa-rupee-sign"></i>
-                </button>
+                <button id="request-payment-btn" class="btn-primary btn-circle btn-sm"><i class="fas fa-rupee-sign"></i></button>
                 <input type="text" id="chat-input" placeholder="Type a message..." class="chat-input">
                 <button onclick="sendMessage()" class="btn-primary btn-circle btn-sm"><i class="fas fa-paper-plane"></i></button>
             </div>
         </div>
     </div>
 
-    <!-- ================= MODALS ================= -->
-
-    <!-- 1. AUTH MODAL -->
+    <!-- MODALS (unchanged - keeping same IDs) -->
     <div id="auth-modal" class="modal-overlay hidden">
         <div class="modal-content">
             <div class="auth-tabs">
@@ -278,166 +225,72 @@
                 <button id="tab-signup" class="auth-tab" onclick="switchAuthTab('signup')">Create Account</button>
                 <button onclick="closeModal('auth-modal')" class="close-btn ml-auto">&times;</button>
             </div>
-
             <form id="signin-form">
-                <div class="form-group">
-                    <label>Phone or Email</label>
-                    <input type="text" id="signin-identity" class="form-input" required placeholder="9876543210 or you@example.com">
-                </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="signin-password" class="form-input" required placeholder="Enter password">
-                </div>
+                <div class="form-group"><label>Phone or Email</label><input type="text" id="signin-identity" class="form-input" required placeholder="9876543210 or you@example.com"></div>
+                <div class="form-group"><label>Password</label><input type="password" id="signin-password" class="form-input" required placeholder="Enter password"></div>
                 <button type="submit" class="btn btn-primary w-full">Sign In</button>
             </form>
-
             <form id="signup-form" class="hidden">
-                <div class="form-group">
-                    <label>Full Name</label>
-                    <input type="text" id="signup-name" class="form-input" required placeholder="Sai Kumar">
-                </div>
-                <div class="form-group">
-                    <label>Phone Number</label>
-                    <input type="tel" id="signup-phone" class="form-input" required placeholder="9876543210">
-                </div>
-                <div class="form-group">
-                    <label>Email Address</label>
-                    <input type="email" id="signup-email" class="form-input" required placeholder="sai@example.com">
-                </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="signup-password" class="form-input" required placeholder="Create a strong password">
-                </div>
-                <div class="form-group">
-                    <label>Confirm Password</label>
-                    <input type="password" id="signup-confirm-password" class="form-input" required placeholder="Re-enter password">
-                </div>
+                <div class="form-group"><label>Full Name</label><input type="text" id="signup-name" class="form-input" required placeholder="Sai Kumar"></div>
+                <div class="form-group"><label>Phone Number</label><input type="tel" id="signup-phone" class="form-input" required placeholder="9876543210"></div>
+                <div class="form-group"><label>Email Address</label><input type="email" id="signup-email" class="form-input" required placeholder="sai@example.com"></div>
+                <div class="form-group"><label>Password</label><input type="password" id="signup-password" class="form-input" required placeholder="Create a strong password"></div>
+                <div class="form-group"><label>Confirm Password</label><input type="password" id="signup-confirm-password" class="form-input" required placeholder="Re-enter password"></div>
                 <button type="submit" class="btn btn-primary w-full" id="signup-submit-btn">Send OTP</button>
                 <p class="terms-text">By signing up, you agree to our Terms of Service.</p>
             </form>
         </div>
     </div>
 
-    <!-- 2. OTP MODAL -->
     <div id="otp-modal" class="modal-overlay hidden">
         <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">Verify Email</h2>
-                <button onclick="closeModal('otp-modal')" class="close-btn">&times;</button>
-            </div>
+            <div class="modal-header"><h2 class="modal-title">Verify Email</h2><button onclick="closeModal('otp-modal')" class="close-btn">&times;</button></div>
             <p class="text-sub mb-3" id="otp-message">Enter the 6-digit code sent to your email.</p>
-            <div class="form-group">
-                <label>OTP Code</label>
-                <input type="text" id="otp-code" class="form-input" maxlength="6" placeholder="000000" style="text-align:center; font-size:24px; letter-spacing:8px;">
-            </div>
+            <div class="form-group"><label>OTP Code</label><input type="text" id="otp-code" class="form-input" maxlength="6" placeholder="000000" style="text-align:center; font-size:22px; letter-spacing:6px;"></div>
             <button class="btn btn-primary w-full" onclick="verifyOTP()">Verify & Create Account</button>
         </div>
     </div>
 
-    <!-- 3. STEERAGENT APPLICATION MODAL -->
     <div id="steer-agent-modal" class="modal-overlay hidden">
         <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">SteerAgent Application</h2>
-                <button onclick="closeModal('steer-agent-modal')" class="close-btn">&times;</button>
-            </div>
+            <div class="modal-header"><h2 class="modal-title">SteerAgent Application</h2><button onclick="closeModal('steer-agent-modal')" class="close-btn">&times;</button></div>
             <form id="steer-agent-form">
-                <div class="form-group">
-                    <label>Vehicle Number</label>
-                    <input type="text" id="sa-vehicle-number" class="form-input" required placeholder="KA01AB1234">
-                </div>
-                <div class="form-group">
-                    <label>Vehicle Type</label>
-                    <select id="sa-vehicle-type" class="form-input" required>
-                        <option value="">Select...</option>
-                        <option value="two-wheeler">Bike</option>
-                        <option value="car">Car</option>
-                        <option value="auto">Auto</option>
-                        <option value="bus">Bus</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>UPI ID (For Payments)</label>
-                    <input type="text" id="sa-upi-id" class="form-input" required placeholder="yourname@upi">
-                </div>
-                <div class="form-group">
-                    <label>Driver's License Photo</label>
-                    <input type="file" id="sa-license" class="form-input" accept="image/*" required>
-                </div>
-                <div class="form-group">
-                    <label>Vehicle RC Photo</label>
-                    <input type="file" id="sa-rc" class="form-input" accept="image/*" required>
-                </div>
-                <div class="form-group">
-                    <label>Selfie with Vehicle</label>
-                    <input type="file" id="sa-selfie" class="form-input" accept="image/*" required>
-                </div>
-
-                <div class="agreement-box">
-                    <strong>SteerAgent Agreement</strong>
-                    <p>By checking this box, I confirm that all documents uploaded are authentic and belong to me. I agree to follow all traffic rules, maintain my vehicle responsibly, and treat all RearAgents with respect. I understand that any violation may lead to immediate termination of my SteerAgent account.</p>
-                </div>
-                <div class="flex align-center mt-2">
-                    <input type="checkbox" id="sa-agreement" required class="toggle-switch">
-                    <label for="sa-agreement" class="ml-2 text-sm">I agree to the SteerAgent Agreement.</label>
-                </div>
-
+                <div class="form-group"><label>Vehicle Number</label><input type="text" id="sa-vehicle-number" class="form-input" required placeholder="KA01AB1234"></div>
+                <div class="form-group"><label>Vehicle Type</label><select id="sa-vehicle-type" class="form-input" required>
+                    <option value="">Select...</option><option value="two-wheeler">Bike</option><option value="car">Car</option><option value="auto">Auto</option><option value="bus">Bus</option>
+                </select></div>
+                <div class="form-group"><label>UPI ID (For Payments)</label><input type="text" id="sa-upi-id" class="form-input" required placeholder="yourname@upi"></div>
+                <div class="form-group"><label>Driver's License Photo</label><input type="file" id="sa-license" class="form-input" accept="image/*" required></div>
+                <div class="form-group"><label>Vehicle RC Photo</label><input type="file" id="sa-rc" class="form-input" accept="image/*" required></div>
+                <div class="form-group"><label>Selfie with Vehicle</label><input type="file" id="sa-selfie" class="form-input" accept="image/*" required></div>
+                <div class="agreement-box"><strong>SteerAgent Agreement</strong><p>By checking this box, I confirm that all documents uploaded are authentic and belong to me. I agree to follow all traffic rules, maintain my vehicle responsibly, and treat all RearAgents with respect.</p></div>
+                <div class="flex align-center mt-2"><input type="checkbox" id="sa-agreement" required class="toggle-switch"><label for="sa-agreement" class="ml-2 text-sm">I agree to the SteerAgent Agreement.</label></div>
                 <button type="submit" class="btn btn-primary w-full mt-4">Submit Application</button>
             </form>
         </div>
     </div>
 
-    <!-- 4. CREATE LANE MODAL -->
     <div id="create-lane-modal" class="modal-overlay hidden">
         <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">Create a Lane</h2>
-                <button onclick="closeModal('create-lane-modal')" class="close-btn">&times;</button>
-            </div>
+            <div class="modal-header"><h2 class="modal-title">Create a Lane</h2><button onclick="closeModal('create-lane-modal')" class="close-btn">&times;</button></div>
             <form id="create-lane-form">
-                <div class="form-group">
-                    <label>Route Title</label>
-                    <input type="text" id="lane-title" class="form-input" required placeholder="e.g., Hitech City to Gachibowli">
-                </div>
-                <div class="form-group">
-                    <label>Description / Stops</label>
-                    <textarea id="lane-description" class="form-input" rows="2" placeholder="e.g., Via Madhapur, Kondapur"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Total Seats</label>
-                    <input type="number" id="lane-seats" class="form-input" required min="1" max="50" value="4">
-                </div>
-                <div class="form-group">
-                    <label>Vehicle Type</label>
-                    <select id="lane-vehicle-type" class="form-input" required>
-                        <option value="car">Car</option>
-                        <option value="bike">Bike</option>
-                        <option value="auto">Auto</option>
-                        <option value="bus">Bus</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Vehicle Photo (Optional)</label>
-                    <input type="file" id="lane-photo" class="form-input" accept="image/*">
-                </div>
+                <div class="form-group"><label>Route Title</label><input type="text" id="lane-title" class="form-input" required placeholder="e.g., Hitech City to Gachibowli"></div>
+                <div class="form-group"><label>Description / Stops</label><textarea id="lane-description" class="form-input" rows="2" placeholder="e.g., Via Madhapur, Kondapur"></textarea></div>
+                <div class="form-group"><label>Total Seats</label><input type="number" id="lane-seats" class="form-input" required min="1" max="50" value="4"></div>
+                <div class="form-group"><label>Vehicle Type</label><select id="lane-vehicle-type" class="form-input" required>
+                    <option value="car">Car</option><option value="bike">Bike</option><option value="auto">Auto</option><option value="bus">Bus</option>
+                </select></div>
+                <div class="form-group"><label>Vehicle Photo (Optional)</label><input type="file" id="lane-photo" class="form-input" accept="image/*"></div>
                 <button type="submit" class="btn btn-primary w-full mt-4">Post Lane</button>
             </form>
         </div>
     </div>
 
-    <!-- 5. CREATE HIVE POST MODAL -->
     <div id="create-hive-modal" class="modal-overlay hidden">
         <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">Create a Post</h2>
-                <button onclick="closeModal('create-hive-modal')" class="close-btn">&times;</button>
-            </div>
+            <div class="modal-header"><h2 class="modal-title">Create a Post</h2><button onclick="closeModal('create-hive-modal')" class="close-btn">&times;</button></div>
             <form id="create-hive-form">
-                <div class="form-group">
-                    <label>What's happening?</label>
-                    <textarea id="hive-text" class="form-input" rows="3" required placeholder="Share an update with the community..."></textarea>
-                </div>
-                
+                <div class="form-group"><label>What's happening?</label><textarea id="hive-text" class="form-input" rows="3" required placeholder="Share an update..."></textarea></div>
                 <div class="form-group">
                     <label>Attach Media</label>
                     <div style="display:flex; gap:10px; margin-bottom:10px;">
@@ -445,76 +298,44 @@
                             <i class="fas fa-image"></i> Photo <input type="file" id="hive-photo" accept="image/*" style="display:none;" onchange="document.getElementById('hive-embed-url').value=''">
                         </label>
                     </div>
-                    <input type="url" id="hive-embed-url" class="form-input" placeholder="Or paste YouTube/Instagram link here..." oninput="document.getElementById('hive-photo').value=''">
+                    <input type="url" id="hive-embed-url" class="form-input" placeholder="Or paste YouTube/Instagram link..." oninput="document.getElementById('hive-photo').value=''">
                 </div>
-                
                 <button type="submit" class="btn btn-primary w-full mt-4">Post to Hive</button>
             </form>
         </div>
     </div>
 
-    <!-- 6. EDIT PROFILE MODAL -->
     <div id="edit-profile-modal" class="modal-overlay hidden">
         <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">Edit Profile</h2>
-                <button onclick="closeModal('edit-profile-modal')" class="close-btn">&times;</button>
-            </div>
+            <div class="modal-header"><h2 class="modal-title">Edit Profile</h2><button onclick="closeModal('edit-profile-modal')" class="close-btn">&times;</button></div>
             <form id="edit-profile-form">
-                <div class="form-group">
-                    <label>Full Name</label>
-                    <input type="text" id="edit-name" class="form-input" required>
-                </div>
-                <div class="form-group">
-                    <label>UPI ID (For Payments)</label>
-                    <input type="text" id="edit-upi" class="form-input" placeholder="yourname@upi">
-                </div>
-                <div class="form-group">
-                    <label>Profile Photo</label>
-                    <input type="file" id="edit-avatar" class="form-input" accept="image/*">
-                </div>
+                <div class="form-group"><label>Full Name</label><input type="text" id="edit-name" class="form-input" required></div>
+                <div class="form-group"><label>UPI ID (For Payments)</label><input type="text" id="edit-upi" class="form-input" placeholder="yourname@upi"></div>
+                <div class="form-group"><label>Profile Photo</label><input type="file" id="edit-avatar" class="form-input" accept="image/*"></div>
                 <button type="submit" class="btn btn-primary w-full mt-4">Save Changes</button>
             </form>
         </div>
     </div>
 
-    <!-- 7. TRIP HISTORY MODAL -->
     <div id="trips-modal" class="modal-overlay hidden">
         <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">My Trips</h2>
-                <button onclick="closeModal('trips-modal')" class="close-btn">&times;</button>
-            </div>
-            <div id="trips-list">
-                <div class="text-center text-sub text-sm" style="padding:20px;">
-                    <div class="spinner"></div>
-                </div>
-            </div>
+            <div class="modal-header"><h2 class="modal-title">My Trips</h2><button onclick="closeModal('trips-modal')" class="close-btn">&times;</button></div>
+            <div id="trips-list"><div class="text-center text-sub text-sm" style="padding:20px;"><div class="spinner"></div></div></div>
         </div>
     </div>
 
-    <!-- 8. ADMIN PANEL MODAL -->
     <div id="admin-modal" class="modal-overlay hidden">
         <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">Admin Panel</h2>
-                <button onclick="closeModal('admin-modal')" class="close-btn">&times;</button>
-            </div>
+            <div class="modal-header"><h2 class="modal-title">Admin Panel</h2><button onclick="closeModal('admin-modal')" class="close-btn">&times;</button></div>
             <h3 class="section-subtitle">Pending SteerAgent Applications</h3>
-            <div id="admin-application-list" class="mt-2">
-                <p class="text-sub text-sm">No pending applications.</p>
-            </div>
+            <div id="admin-application-list" class="mt-2"><p class="text-sub text-sm">No pending applications.</p></div>
         </div>
     </div>
 
-    <!-- 9. REPORT ALERT MODAL -->
     <div id="report-modal" class="modal-overlay hidden">
         <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">Report Road Condition</h2>
-                <button onclick="closeModal('report-modal')" class="close-btn">&times;</button>
-            </div>
-            <p class="text-sub mb-3">Drop a quick alert on the map for other drivers.</p>
+            <div class="modal-header"><h2 class="modal-title">Report Road Condition</h2><button onclick="closeModal('report-modal')" class="close-btn">&times;</button></div>
+            <p class="text-sub mb-3">Drop a quick alert on the map.</p>
             <div class="grid-2-col">
                 <button class="btn btn-secondary" onclick="reportAlert('traffic')">🚧 Traffic</button>
                 <button class="btn btn-secondary" onclick="reportAlert('pothole')">🕳️ Pothole</button>
@@ -524,90 +345,48 @@
         </div>
     </div>
 
-    <!-- 10. SAVE LOCATION MODAL -->
     <div id="location-modal" class="modal-overlay hidden">
         <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">Save Location</h2>
-                <button onclick="closeModal('location-modal')" class="close-btn">&times;</button>
-            </div>
-            <div class="form-group">
-                <label>Location Name</label>
-                <input type="text" id="location-name" class="form-input" placeholder="e.g., Good Parking Spot">
-            </div>
+            <div class="modal-header"><h2 class="modal-title">Save Location</h2><button onclick="closeModal('location-modal')" class="close-btn">&times;</button></div>
+            <div class="form-group"><label>Location Name</label><input type="text" id="location-name" class="form-input" placeholder="e.g., Good Parking Spot"></div>
             <button class="btn btn-primary w-full" onclick="confirmSaveLocation()">Save to My Profile</button>
         </div>
     </div>
 
-    <!-- 11. LOG VIEWER MODAL (Debug) -->
     <div id="log-modal" class="modal-overlay hidden">
         <div class="modal-content log-modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title"><i class="fas fa-bug"></i> Debug Log</h2>
-                <button onclick="closeModal('log-modal')" class="close-btn">&times;</button>
-            </div>
-            <p class="text-sub text-xs mb-2" style="line-height:1.5;">
-                Captures console output, errors, and failed network requests.
-                Long-press the logo anytime to open this.
-            </p>
-            <div id="logContent" class="log-content">
-                <div class="log-empty">No logs yet.</div>
-            </div>
+            <div class="modal-header"><h2 class="modal-title"><i class="fas fa-bug"></i> Debug Log</h2><button onclick="closeModal('log-modal')" class="close-btn">&times;</button></div>
+            <p class="text-sub text-xs mb-2">Long-press the logo anytime to open this.</p>
+            <div id="logContent" class="log-content"><div class="log-empty">No logs yet.</div></div>
             <div class="log-actions">
-                <button class="btn btn-secondary btn-sm" onclick="logger.export()">
-                    <i class="fas fa-copy"></i> Copy
-                </button>
-                <button class="btn btn-danger btn-sm" onclick="logger.clear()">
-                    <i class="fas fa-trash"></i> Clear
-                </button>
+                <button class="btn btn-secondary btn-sm" onclick="logger.export()"><i class="fas fa-copy"></i> Copy</button>
+                <button class="btn btn-danger btn-sm" onclick="logger.clear()"><i class="fas fa-trash"></i> Clear</button>
             </div>
         </div>
     </div>
 
-    <!-- ================= SCRIPTS ================= -->
-
-    <!-- 1. Load Configuration FIRST (sets window.STEERADAR) -->
     <script src="config.js"></script>
-
-    <!-- 2. Leaflet (for map base + markers + polylines) -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-    <!-- 3. MapLibre GL + Leaflet plugin (for keyless dark vector tiles) -->
-    <script src="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.js"></script>
-    <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.19/leaflet-maplibre-gl.js"></script>
-
-    <!-- 4. Main App Logic (Module) -->
     <script type="module" src="js/app.js"></script>
 
-    <!-- 5. UNREGISTER any existing Service Workers (one-time cleanup) -->
     <script>
+        // Unregister any old service workers
         (function() {
             if (!('serviceWorker' in navigator)) return;
-
-            // Unregister ALL service workers
-            navigator.serviceWorker.getRegistrations().then(function(registrations) {
-                if (!registrations.length) return;
-                for (let reg of registrations) {
-                    reg.unregister().then(function(success) {
-                        console.log('[SW] Unregistered:', reg.scope, success ? '✅' : '❌');
-                    });
-                }
-            }).catch(function(err) {
-                console.warn('[SW] Unregister error:', err);
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+                for (let reg of regs) reg.unregister();
             });
+            if (window.caches) caches.keys().then(function(names) {
+                for (let name of names) caches.delete(name);
+            });
+        })();
 
-            // Clear ALL caches
-            if (window.caches) {
-                caches.keys().then(function(names) {
-                    for (let name of names) {
-                        caches.delete(name).then(function() {
-                            console.log('[Cache] Deleted:', name);
-                        });
-                    }
-                }).catch(function(err) {
-                    console.warn('[Cache] Delete error:', err);
-                });
-            }
+        // Apply saved theme immediately (before app.js loads)
+        (function() {
+            try {
+                const t = localStorage.getItem('steeradar-theme') || 'light';
+                document.documentElement.setAttribute('data-theme', t);
+            } catch (e) {}
         })();
     </script>
 </body>
