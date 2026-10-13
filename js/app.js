@@ -1,15 +1,16 @@
 /**
  * ============================================================================
- * STEERADAR FRONTEND CONTROLLER (v8.0)
+ * STEERADAR FRONTEND CONTROLLER (v9.0)
  * ============================================================================
  * Complete client for the SteerRadar community ride network.
  * 
  * MODULES:
- * - Auth (OTP + Password)             - Role-Based UI (RearAgent/SteerAgent/Admin)
- * - Lanes (Live driver routes)        - Hive (Community feed with media embeds)
- * - Chat (Real-time messaging)        - Map (Leaflet + presence tracking)
- * - Trips (Route tracking + history)  - Notifications (Toast system)
- * - PWA (Installable app + offline)   - Network resilience (auto-retry)
+ * - Auth (OTP + Password)                - Role-Based UI (Rear/Steer/Admin)
+ * - Lanes (Live routes)                  - Hive (Feed with media embeds)
+ * - Chat (Global + Neighborhood)         - Map (Leaflet + presence)
+ * - Trips (Route + History)              - Alerts & Reports
+ * - Ghost Mode                           - PWA Install Prompt
+ * - Notifications (Toast system)         - Network resilience
  * ============================================================================
  */
 
@@ -17,12 +18,12 @@ import { api } from './api.js';
 import { mapModule } from './map.js';
 
 // ============================================================================
-// 1. CONFIGURATION & CONSTANTS
+// 1. CONFIGURATION
 // ============================================================================
 const CONFIG = window.STEERADAR || {};
-const POLL_INTERVAL = 20000;      // Refresh lanes/hive every 20s
-const PRESENCE_INTERVAL = 20000;  // GPS broadcast for agents
-const CHAT_POLL_INTERVAL = 5000;  // Chat message polling
+const POLL_INTERVAL = 20000;       // Lanes/Hive refresh (20s)
+const PRESENCE_INTERVAL = 20000;   // GPS broadcast (20s)
+const CHAT_POLL_INTERVAL = 5000;   // Chat refresh (5s)
 const TOAST_DURATION = CONFIG.TOAST_DURATION_MS || 2400;
 
 // ============================================================================
@@ -37,7 +38,7 @@ const state = {
     activeTab: 'lanes',
     currentRoom: null,
     
-    // Data Cache
+    // Data
     lanes: [],
     hive: [],
     messages: {},
@@ -56,18 +57,10 @@ const state = {
     tripWatchId: null,
     
     // Intervals
-    intervals: {
-        poll: null,
-        presence: null,
-        chat: null
-    },
+    intervals: { poll: null, presence: null, chat: null },
     
     // Loading flags
-    isLoading: {
-        lanes: false,
-        hive: false,
-        chat: false
-    },
+    isLoading: { lanes: false, hive: false, chat: false },
     
     // Network
     isOnline: navigator.onLine
@@ -77,33 +70,22 @@ const state = {
 // 3. DOM CACHE
 // ============================================================================
 const DOM = {
-    // Views
     views: document.querySelectorAll('.view-section'),
     navButtons: document.querySelectorAll('#bottom-nav button'),
-    
-    // Header
     headerAvatar: document.getElementById('header-avatar'),
     adminBtn: document.getElementById('admin-panel-btn'),
-    
-    // Profile
     profileName: document.getElementById('profile-name-display'),
     profileRole: document.getElementById('profile-role-display'),
     profileAvatar: document.getElementById('profile-avatar-img'),
     becomeAgentSection: document.getElementById('become-steer-agent-section'),
     pendingAgentSection: document.getElementById('steer-agent-pending-section'),
-    
-    // SteerAgent
     steerAgentControls: document.getElementById('steer-agent-controls'),
     tripControls: document.getElementById('trip-controls'),
     tripBtn: document.getElementById('trip-btn'),
-    
-    // Chat
     chatView: document.getElementById('hive-chat-view'),
     chatMessages: document.getElementById('chat-messages-container'),
     chatInput: document.getElementById('chat-input'),
     chatTitle: document.getElementById('chat-room-title'),
-    
-    // Admin
     adminApplicationList: document.getElementById('admin-application-list')
 };
 
@@ -111,7 +93,7 @@ const DOM = {
 // 4. INITIALIZATION
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('%c SteerRadar v8.0 booted ', 
+    console.log('%c SteerRadar v9.0 booted ', 
         'background:#00d4a0;color:#000;font-weight:800;padding:4px 10px;border-radius:4px;');
     
     setupEventListeners();
@@ -145,12 +127,12 @@ function setupEventListeners() {
     // Settings
     document.getElementById('toggle-ghost-mode')?.addEventListener('change', handleGhostModeToggle);
     
-    // Chat input enter key
+    // Chat
     DOM.chatInput?.addEventListener('keypress', (e) => { 
         if (e.key === 'Enter') sendMessage(); 
     });
     
-    // Trip button
+    // Trip
     DOM.tripBtn?.addEventListener('click', toggleTrip);
     
     // Image previews
@@ -175,7 +157,6 @@ function setupNetworkHandlers() {
         showToast('Back online', 'success');
         refreshAll();
     });
-    
     window.addEventListener('offline', () => {
         state.isOnline = false;
         showToast('You are offline', 'warning');
@@ -216,7 +197,6 @@ async function handleSignIn(e) {
     e.preventDefault();
     const phone = document.getElementById('signin-identity').value.trim();
     const password = document.getElementById('signin-password').value;
-    
     if (!phone || !password) return showToast('Please fill in all fields', 'warning');
     
     const btn = e.target.querySelector('button[type="submit"]');
@@ -246,19 +226,12 @@ async function handleSignupStep1(e) {
         confirmPassword: document.getElementById('signup-confirm-password').value
     };
     
-    // Validation
     if (!data.name || !data.phone || !data.email || !data.password) {
         return showToast('Please fill in all fields', 'warning');
     }
-    if (data.password.length < 6) {
-        return showToast('Password must be at least 6 characters', 'warning');
-    }
-    if (data.password !== data.confirmPassword) {
-        return showToast('Passwords do not match', 'error');
-    }
-    if (!/^[6-9]\d{9}$/.test(data.phone)) {
-        return showToast('Enter a valid 10-digit Indian mobile number', 'warning');
-    }
+    if (data.password.length < 6) return showToast('Password must be at least 6 characters', 'warning');
+    if (data.password !== data.confirmPassword) return showToast('Passwords do not match', 'error');
+    if (!/^[6-9]\d{9}$/.test(data.phone)) return showToast('Enter a valid 10-digit Indian mobile number', 'warning');
     
     state.signupData = data;
     
@@ -286,14 +259,12 @@ window.verifyOTP = async () => {
     const btn = document.querySelector('#otp-modal button');
     setButtonLoading(btn, 'Verifying...');
     
-    // Step 1: Verify OTP
     const verifyRes = await api.verifyOtp(state.signupData.phone, code);
     if (!verifyRes || !verifyRes.verified) {
         resetButton(btn, 'Verify & Create Account');
         return showToast(api.lastError || 'Invalid OTP', 'error');
     }
     
-    // Step 2: Register
     const regRes = await api.register(state.signupData);
     resetButton(btn, 'Verify & Create Account');
     
@@ -326,26 +297,19 @@ function updateUIForRole() {
     
     const avatar = state.user.photo || `https://i.pravatar.cc/150?u=${state.user.phone}`;
     
-    // Header
     if (DOM.headerAvatar) {
         DOM.headerAvatar.src = avatar;
         DOM.headerAvatar.onerror = () => { DOM.headerAvatar.src = 'https://i.pravatar.cc/150?img=11'; };
     }
-    
-    // Profile
     if (DOM.profileName) DOM.profileName.textContent = state.user.name;
     if (DOM.profileRole) DOM.profileRole.textContent = 
         state.user.role === 'agent' ? 'SteerAgent' : 'RearAgent';
     if (DOM.profileAvatar) DOM.profileAvatar.src = avatar;
     
-    // Admin button
     toggleVisibility(DOM.adminBtn, state.user.isAdmin);
-    
-    // SteerAgent map controls
     toggleVisibility(DOM.steerAgentControls, state.user.role === 'agent');
     toggleVisibility(DOM.tripControls, state.user.role === 'agent');
     
-    // SteerAgent application flow
     if (state.user.role === 'agent') {
         toggleVisibility(DOM.becomeAgentSection, false);
         toggleVisibility(DOM.pendingAgentSection, false);
@@ -357,11 +321,9 @@ function updateUIForRole() {
         toggleVisibility(DOM.pendingAgentSection, false);
     }
     
-    // Ghost mode toggle
     const ghostToggle = document.getElementById('toggle-ghost-mode');
     if (ghostToggle) ghostToggle.checked = !!state.user.ghostMode;
     
-    // Greeting
     const greeting = document.getElementById('hive-greeting');
     if (greeting) {
         const hour = new Date().getHours();
@@ -369,7 +331,6 @@ function updateUIForRole() {
         greeting.textContent = `${timeGreeting}, ${state.user.name.split(' ')[0]} 👋`;
     }
     
-    // Load data
     refreshAll();
 }
 
@@ -404,9 +365,7 @@ window.openModal = (id) => {
     if (id === 'admin-modal') loadAdminApplications();
     if (id === 'trips-modal') loadTrips();
     
-    setTimeout(() => 
-        modal.querySelector('input:not([type=file]), textarea')?.focus(), 250
-    );
+    setTimeout(() => modal.querySelector('input:not([type=file]), textarea')?.focus(), 250);
 };
 
 window.closeModal = (id) => document.getElementById(id)?.classList.add('hidden');
@@ -598,9 +557,7 @@ function createHivePostHTML(post) {
     let mediaHTML = '';
     
     if (post.photo) {
-        mediaHTML = `<div class="post-image">
-            <img src="${post.photo}" alt="Post image" onerror="this.style.display='none'">
-        </div>`;
+        mediaHTML = `<div class="post-image"><img src="${post.photo}" alt="Post" onerror="this.style.display='none'"></div>`;
     } else if (post.mediaType === 'youtube' && post.mediaUrl) {
         const vid = extractYouTubeId(post.mediaUrl);
         if (vid) {
@@ -662,7 +619,7 @@ window.toggleLike = async (postId, currentLikes) => {
 };
 
 // ============================================================================
-// 14. CHAT
+// 14. CHAT (Global + Neighborhood)
 // ============================================================================
 window.openChat = async (roomId, name) => {
     state.currentRoom = roomId;
@@ -733,8 +690,31 @@ function scrollToBottom() {
     DOM.chatMessages.scrollTop = DOM.chatMessages.scrollHeight;
 }
 
+// --- NEIGHBORHOOD CHAT ---
+function getNeighborhoodRoomId() {
+    const lat = state.userLocation?.lat || CONFIG.DEFAULT_CENTER?.lat || 17.3850;
+    const lng = state.userLocation?.lng || CONFIG.DEFAULT_CENTER?.lng || 78.4867;
+    return `local_${lat.toFixed(2)}_${lng.toFixed(2)}`;
+}
+
+window.openNeighborhoodChat = async () => {
+    if (!state.user) return showToast('Please sign in first', 'error');
+    
+    showToast('Finding riders near you...', 'info');
+    
+    try {
+        const loc = await mapModule.locateUser();
+        state.userLocation = loc;
+    } catch (e) {
+        console.warn('Using default location for neighborhood chat:', e);
+    }
+    
+    const roomId = getNeighborhoodRoomId();
+    openChat(roomId, '🏘️ Neighborhood Chat');
+};
+
 // ============================================================================
-// 15. FAB (Context-Aware Create Button)
+// 15. FAB (Context-Aware)
 // ============================================================================
 window.handleFABClick = () => {
     if (!state.user) return showToast('Please sign in first', 'error');
@@ -1082,7 +1062,6 @@ async function broadcastPresence() {
                 vehicle: state.user.vehicle || ''
             });
             
-            // Update trip polyline if trip is active
             if (state.activeTrip) {
                 const point = [latitude, longitude];
                 const last = state.tripPoints[state.tripPoints.length - 1];
@@ -1153,7 +1132,6 @@ window.toggleTrip = async () => {
     const btn = DOM.tripBtn;
     
     if (state.activeTrip) {
-        // END TRIP
         setButtonLoading(btn, '');
         const endLat = state.userLocation?.lat || null;
         const endLng = state.userLocation?.lng || null;
@@ -1182,7 +1160,6 @@ window.toggleTrip = async () => {
             showToast('Failed to end trip', 'error');
         }
     } else {
-        // START TRIP
         setButtonLoading(btn, '');
         const startLat = state.userLocation?.lat || CONFIG.DEFAULT_CENTER?.lat || 17.3850;
         const startLng = state.userLocation?.lng || CONFIG.DEFAULT_CENTER?.lng || 78.4867;
@@ -1195,9 +1172,7 @@ window.toggleTrip = async () => {
             state.activeTrip = res;
             state.tripPoints = [[startLat, startLng]];
             btn.classList.add('active');
-            
             state.tripPolyline = mapModule.drawPolyline?.(state.tripPoints);
-            
             startTripTracking();
         } else {
             showToast('Failed to start trip', 'error');
@@ -1212,7 +1187,6 @@ function startTripTracking() {
         (pos) => {
             const { latitude, longitude } = pos.coords;
             const point = [latitude, longitude];
-            
             const last = state.tripPoints[state.tripPoints.length - 1];
             if (last && calculateDistance([last, point]) < 0.01) return;
             
