@@ -2,23 +2,42 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>SteerRadar · Community Ride Network</title>
+    
     <!-- PWA Manifest -->
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#00d4a0">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="SteerRadar">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#00d4a0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SteerRadar">
+    
+    <!-- Favicon (Raw GitHub URL) -->
+    <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steerardar-logo.png">
+    <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steerardar-logo.png">
+    
     <!-- FontAwesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- Leaflet Map CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     
     <!-- Main Stylesheet -->
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="styles.css">
+    
+    <style>
+        /* Quick inline logo fallback styles (also in styles.css) */
+        .brand-logo {
+            height: 42px;
+            width: auto;
+            object-fit: contain;
+            filter: drop-shadow(0 0 8px rgba(0, 212, 160, 0.4));
+            transition: filter 0.25s ease;
+        }
+        .logo-text:hover .brand-logo {
+            filter: drop-shadow(0 0 12px rgba(0, 212, 160, 0.7));
+        }
+    </style>
 </head>
 <body>
 
@@ -27,11 +46,20 @@
 
         <!-- HEADER -->
         <header id="main-header">
-            <div class="logo-text">
-                <i class="fas fa-satellite-dish"></i> SteerRadar
+            <div class="logo-text" onclick="switchTab('lanes')">
+                <!-- Primary Logo (Raw GitHub URL) -->
+                <img 
+                    src="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steerardar-logo.png" 
+                    alt="SteerRadar" 
+                    class="brand-logo"
+                    onerror="if(this.src.includes('steerardar')){this.src='https://raw.githubusercontent.com/suryasticsai/steerradar/main/steeradar-logo.png';}else{this.style.display='none'; this.nextElementSibling.style.display='flex';}"
+                >
+                <!-- Fallback icon if image fails completely -->
+                <span class="brand-fallback" style="display:none;">
+                    <i class="fas fa-satellite-dish"></i> SteerRadar
+                </span>
             </div>
             <div class="header-actions">
-                <!-- Admin Panel Button (Visible only to Admins) -->
                 <button id="admin-panel-btn" class="hidden btn btn-secondary btn-sm" onclick="openModal('admin-modal')">
                     <i class="fas fa-shield-alt"></i> Admin
                 </button>
@@ -42,7 +70,7 @@
 
         <!-- MAIN VIEWS -->
         <main>
-            <!-- 1. LANES VIEW (Live Drivers) -->
+            <!-- 1. LANES VIEW -->
             <section id="view-lanes" class="view-section active">
                 <div class="section-header flex justify-between align-center">
                     <div>
@@ -53,22 +81,18 @@
                         <i class="fas fa-filter"></i> All Lanes
                     </button>
                 </div>
-                <!-- Lane cards will be dynamically injected here by app.js -->
             </section>
 
-            <!-- 2. HIVE VIEW (Community Feed) -->
+            <!-- 2. HIVE VIEW -->
             <section id="view-hive" class="view-section">
                 <div class="hive-header">
                     <h2 class="hive-title">Hive</h2>
                     <p class="text-sub">Your community. All aboard.</p>
                 </div>
 
-                <!-- Stories -->
                 <div class="stories-container">
                     <div class="story-item">
-                        <div class="story-avatar story-add">
-                            <i class="fas fa-plus"></i>
-                        </div>
+                        <div class="story-avatar story-add"><i class="fas fa-plus"></i></div>
                         <span class="story-name">Your story</span>
                     </div>
                     <div class="story-item">
@@ -89,7 +113,6 @@
                     </div>
                 </div>
 
-                <!-- Greeting Card -->
                 <div class="post-card greeting-card">
                     <div class="flex justify-between align-center">
                         <div>
@@ -102,16 +125,13 @@
                 </div>
 
                 <h3 class="section-subtitle">Local posts</h3>
-                <!-- Hive posts will be dynamically injected here by app.js -->
             </section>
 
             <!-- 3. MAP VIEW -->
-            <section id="view-map" class="view-section p-0">
+            <section id="view-map" class="view-section">
                 <div id="map-container">
-                    <!-- Leaflet Map renders here -->
-                    <div id="map" style="width: 100%; height: 100%; z-index: 1;"></div>
+                    <div id="map"></div>
                     
-                    <!-- SteerAgent Map Controls (Visible only to agents) -->
                     <div id="steer-agent-controls" class="map-overlay-controls hidden">
                         <button class="btn-primary btn-circle" onclick="openModal('report-modal')" title="Report Alert">
                             <i class="fas fa-exclamation-triangle"></i>
@@ -124,8 +144,7 @@
                         </button>
                     </div>
 
-                    <!-- Trip Controls (SteerAgent Only) -->
-                    <div id="trip-controls" class="map-overlay-controls hidden" style="bottom: 170px;">
+                    <div id="trip-controls" class="map-overlay-controls hidden">
                         <button id="trip-btn" class="btn-primary btn-circle" onclick="toggleTrip()" title="Start/End Trip">
                             <i class="fas fa-play"></i>
                         </button>
@@ -139,24 +158,22 @@
                     <img src="https://i.pravatar.cc/150?img=11" class="profile-avatar" id="profile-avatar-img">
                     <h2 id="profile-name-display" class="profile-name">Loading...</h2>
                     <p id="profile-role-display" class="profile-role">RearAgent</p>
-                    <!-- Edit Profile Button -->
-                    <button class="btn btn-secondary btn-sm mt-2" onclick="openEditProfile()"><i class="fas fa-edit"></i> Edit Profile</button>
+                    <button class="btn btn-secondary btn-sm mt-2" onclick="openEditProfile()">
+                        <i class="fas fa-edit"></i> Edit Profile
+                    </button>
                 </div>
 
-                <!-- SteerAgent Upgrade Section -->
                 <div id="become-steer-agent-section" class="post-card upgrade-card hidden">
                     <h3 class="upgrade-title">Become a SteerAgent</h3>
                     <p class="text-sub mb-3">Verify your documents to unlock driving features, post lanes, and accept payments.</p>
                     <button class="btn btn-primary w-full" onclick="openModal('steer-agent-modal')">Apply Now</button>
                 </div>
 
-                <!-- Pending Status -->
                 <div id="steer-agent-pending-section" class="post-card pending-card hidden">
                     <h3 class="pending-title">Application Under Review</h3>
                     <p class="text-sub text-white">Your documents are being validated by an Admin. Check your email for updates.</p>
                 </div>
 
-                <!-- Settings -->
                 <div class="post-card">
                     <h3 class="section-subtitle">Preferences</h3>
                     <div class="setting-row">
@@ -173,7 +190,6 @@
                     </div>
                 </div>
 
-                <!-- Trip History Button -->
                 <button class="btn btn-secondary w-full mt-3" onclick="openModal('trips-modal')">
                     <i class="fas fa-route"></i> My Trips
                 </button>
@@ -187,7 +203,6 @@
             <button onclick="switchTab('lanes')" class="active" id="nav-lanes"><i class="fas fa-bus"></i> Lanes</button>
             <button onclick="switchTab('hive')" id="nav-hive"><i class="fas fa-comments"></i> Hive</button>
             
-            <!-- Floating Action Button (Context-Aware) -->
             <button id="fab-create" class="fab" onclick="handleFABClick()">
                 <i class="fas fa-plus"></i>
             </button>
@@ -203,12 +218,8 @@
                 <h3 id="chat-room-title" class="chat-title">Hive Chat</h3>
             </header>
 
-            <!-- Messages Container (Oldest at top, Newest at bottom) -->
-            <div id="chat-messages-container" class="chat-container">
-                <!-- Messages will be injected here by JS -->
-            </div>
+            <div id="chat-messages-container" class="chat-container"></div>
 
-            <!-- Chat Input -->
             <div class="chat-input-area">
                 <button id="request-payment-btn" class="btn-primary btn-circle btn-sm" title="Request UPI Payment">
                     <i class="fas fa-rupee-sign"></i>
@@ -221,7 +232,7 @@
 
     <!-- ================= MODALS ================= -->
 
-    <!-- 1. AUTHENTICATION MODAL (Sign In / Sign Up) -->
+    <!-- 1. AUTH MODAL -->
     <div id="auth-modal" class="modal-overlay hidden">
         <div class="modal-content">
             <div class="auth-tabs">
@@ -230,7 +241,6 @@
                 <button onclick="closeModal('auth-modal')" class="close-btn ml-auto">&times;</button>
             </div>
 
-            <!-- Sign In Form -->
             <form id="signin-form">
                 <div class="form-group">
                     <label>Phone or Email</label>
@@ -243,7 +253,6 @@
                 <button type="submit" class="btn btn-primary w-full">Sign In</button>
             </form>
 
-            <!-- Sign Up Form -->
             <form id="signup-form" class="hidden">
                 <div class="form-group">
                     <label>Full Name</label>
@@ -271,7 +280,7 @@
         </div>
     </div>
 
-    <!-- 2. OTP VERIFICATION MODAL -->
+    <!-- 2. OTP MODAL -->
     <div id="otp-modal" class="modal-overlay hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -339,7 +348,7 @@
         </div>
     </div>
 
-    <!-- 4. CREATE LANE MODAL (SteerAgent Only) -->
+    <!-- 4. CREATE LANE MODAL -->
     <div id="create-lane-modal" class="modal-overlay hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -454,13 +463,12 @@
             </div>
             <h3 class="section-subtitle">Pending SteerAgent Applications</h3>
             <div id="admin-application-list" class="mt-2">
-                <!-- Applications will be injected here by JS -->
                 <p class="text-sub text-sm">No pending applications.</p>
             </div>
         </div>
     </div>
 
-    <!-- 9. REPORT ALERT MODAL (SteerAgent Only) -->
+    <!-- 9. REPORT ALERT MODAL -->
     <div id="report-modal" class="modal-overlay hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -493,42 +501,18 @@
     </div>
 
     <!-- ================= SCRIPTS ================= -->
-    <!-- ================= SCRIPTS ================= -->
+    <script src="config.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="module" src="js/app.js"></script>
 
-<!-- 1. Load Configuration FIRST (Sets window.STEERADAR) -->
-<script src="config.js"></script>
-
-<!-- 2. Load Leaflet Map Library -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-<!-- 3. Load Main App Logic (Module) -->
-<script type="module" src="js/app.js"></script>
-
-<!-- 4. Register Service Worker (PWA) -->
-<script>
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.register('./sw.js')
-                .then(reg => {
-                    console.log('[PWA] Service Worker registered', reg.scope);
-                    
-                    // Check for updates
-                    reg.addEventListener('updatefound', () => {
-                        const newWorker = reg.installing;
-                        newWorker.addEventListener('statechange', () => {
-                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                // New version available
-                                if (confirm('A new version of SteerRadar is available. Reload?')) {
-                                    newWorker.postMessage({ type: 'SKIP_WAITING' });
-                                    window.location.reload();
-                                }
-                            }
-                        });
-                    });
-                })
-                .catch(err => console.warn('[PWA] Service Worker registration failed:', err));
-        });
-    }
-</script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('[PWA] Service Worker registered', reg.scope))
+                    .catch(err => console.warn('[PWA] SW registration failed:', err));
+            });
+        }
+    </script>
 </body>
 </html>
