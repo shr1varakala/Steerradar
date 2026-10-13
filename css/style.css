@@ -2674,4 +2674,824 @@ a:focus-visible {
     .section-header, .hive-header, .profile-header { max-width: 600px; margin-left: auto; margin-right: auto; }
     .stories-container { max-width: 600px; margin-left: auto; margin-right: auto; }
     #trips-list { max-width: 600px; margin-left: auto; margin-right: auto; }
+
+/* ============================================================================
+   SECTION 20: EXTENDED ENHANCEMENTS
+   ============================================================================
+   Polish, animations, utilities, and new components.
+   Append this entire block at the bottom of styles.css.
+   ============================================================================ */
+
+/* ============================ 20.1 CARD SHINE SWEEP ============================ */
+.lane-card,
+.post-card,
+.trip-card {
+    position: relative;
+    overflow: hidden;
+}
+
+.lane-card::after,
+.post-card::after,
+.trip-card::after {
+    content: '';
+    position: absolute;
+    top: 0; left: -100%;
+    width: 100%; height: 100%;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(0, 212, 160, 0.08) 50%,
+        transparent 100%
+    );
+    transition: left 0.6s ease;
+    pointer-events: none;
+    z-index: 2;
+}
+.lane-card:hover::after,
+.post-card:hover::after,
+.trip-card:hover::after {
+    left: 100%;
+}
+
+/* ============================ 20.2 AVATAR WITH STATUS RING ============================ */
+.avatar-ring {
+    position: relative;
+    display: inline-block;
+}
+.avatar-ring::before {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    padding: 2px;
+    background: linear-gradient(135deg, var(--primary), #4F46E5);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: ringRotate 4s linear infinite;
+}
+@keyframes ringRotate {
+    to { transform: rotate(360deg); }
+}
+
+/* Online/offline status dot on avatar */
+.status-dot {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--bg-dark);
+    background: var(--text-muted);
+}
+.status-dot.online {
+    background: var(--primary);
+    box-shadow: 0 0 8px var(--primary);
+}
+.status-dot.online::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: var(--primary);
+    animation: statusPulse 1.8s infinite;
+}
+@keyframes statusPulse {
+    0% { transform: scale(1); opacity: 0.8; }
+    100% { transform: scale(2.4); opacity: 0; }
+}
+
+/* ============================ 20.3 BADGES & PILLS ============================ */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: var(--radius-pill);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    background: var(--bg-card-hover);
+    color: var(--text-sub);
+}
+.badge-primary {
+    background: var(--primary-subtle);
+    color: var(--primary);
+}
+.badge-danger {
+    background: var(--danger-subtle);
+    color: var(--danger);
+}
+.badge-warning {
+    background: var(--warning-subtle);
+    color: var(--warning);
+}
+.badge-new::after {
+    content: 'NEW';
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 8px;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+}
+
+/* Count bubble (for nav, chat) */
+.count-bubble {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 6px rgba(255, 77, 77, 0.5);
+    animation: bubblePop 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+@keyframes bubblePop {
+    0% { transform: scale(0); }
+    100% { transform: scale(1); }
+}
+
+/* ============================ 20.4 CHIPS / FILTER PILLS ============================ */
+.chip-row {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 4px 0 12px;
+    scrollbar-width: none;
+}
+.chip-row::-webkit-scrollbar { display: none; }
+
+.chip {
+    padding: 6px 14px;
+    border-radius: var(--radius-pill);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-sub);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.chip:hover {
+    border-color: var(--primary);
+    color: var(--text-main);
+}
+.chip.active {
+    background: var(--primary);
+    color: #000;
+    border-color: var(--primary);
+    box-shadow: 0 4px 12px var(--primary-glow);
+}
+.chip i { font-size: 11px; }
+
+/* ============================ 20.5 PROGRESS RING ============================ */
+.progress-ring {
+    position: relative;
+    width: 60px;
+    height: 60px;
+}
+.progress-ring svg {
+    transform: rotate(-90deg);
+    width: 100%;
+    height: 100%;
+}
+.progress-ring circle {
+    fill: none;
+    stroke-width: 4;
+}
+.progress-ring .ring-bg {
+    stroke: var(--border-subtle);
+}
+.progress-ring .ring-fg {
+    stroke: var(--primary);
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.6s ease;
+    filter: drop-shadow(0 0 6px var(--primary-glow));
+}
+
+/* ============================ 20.6 FLOATING MAP ACTION BAR ============================ */
+.map-action-bar {
+    position: absolute;
+    bottom: calc(20px + var(--safe-bottom));
+    left: 20px;
+    right: 20px;
+    display: flex;
+    gap: 8px;
+    padding: 10px;
+    background: var(--bg-glass);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-lg);
+    z-index: 15;
+}
+.map-action-bar .btn {
+    flex: 1;
+    padding: 10px 12px;
+    font-size: 12px;
+    border-radius: var(--radius-md);
+}
+
+/* Floating compass indicator */
+.map-compass {
+    position: absolute;
+    top: calc(90px + var(--safe-top));
+    right: 20px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: var(--primary);
+    box-shadow: var(--shadow-md);
+    z-index: 12;
+    cursor: pointer;
+    transition: transform var(--transition-bounce);
+}
+.map-compass:hover { transform: scale(1.08); }
+.map-compass:active { transform: scale(0.95); }
+
+/* Map scale / distance indicator */
+.map-scale {
+    position: absolute;
+    bottom: calc(90px + var(--safe-bottom));
+    left: 20px;
+    padding: 6px 12px;
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+    font-size: 11px;
+    color: var(--text-sub);
+    z-index: 12;
+    font-family: 'SF Mono', monospace;
+    font-weight: 600;
+}
+.map-scale b { color: var(--primary); }
+
+/* ============================ 20.7 DISTANCE PILL ============================ */
+.distance-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--primary);
+    border-radius: var(--radius-pill);
+    color: var(--primary);
+    font-size: 12px;
+    font-weight: 700;
+    font-family: 'SF Mono', monospace;
+}
+.distance-pill i { color: var(--info); }
+
+/* ============================ 20.8 ROUTE INFO PANEL ============================ */
+.route-info-panel {
+    display: flex;
+    gap: 12px;
+    padding: 14px;
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    border-left: 3px solid var(--primary);
+    margin: 12px 0;
+}
+.route-info-panel .route-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--primary-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary);
+    flex-shrink: 0;
+}
+.route-info-panel .route-details {
+    flex: 1;
+    min-width: 0;
+}
+.route-info-panel .route-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-main);
+    margin-bottom: 4px;
+}
+.route-info-panel .route-meta {
+    font-size: 11px;
+    color: var(--text-sub);
+    display: flex;
+    gap: 10px;
+}
+.route-info-panel .route-meta span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* ============================ 20.9 LOADING DOTS ============================ */
+.loading-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.loading-dots span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--primary);
+    animation: dotBounce 1.4s infinite ease-in-out both;
+}
+.loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+.loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+.loading-dots span:nth-child(3) { animation-delay: 0s; }
+@keyframes dotBounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+}
+
+/* ============================ 20.10 NUMBER COUNTER ANIMATION ============================ */
+.count-up {
+    display: inline-block;
+    transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+.count-up.tick {
+    animation: countTick 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+@keyframes countTick {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.3); color: var(--primary); }
+    100% { transform: scale(1); }
+}
+
+/* ============================ 20.11 STAR RATING ============================ */
+.star-rating {
+    display: inline-flex;
+    gap: 4px;
+}
+.star-rating i {
+    font-size: 20px;
+    color: var(--border-color);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.star-rating i:hover,
+.star-rating i:hover ~ i { color: var(--warning); }
+.star-rating:hover i { transform: scale(1.15); }
+.star-rating i.active { color: var(--warning); filter: drop-shadow(0 0 4px rgba(255,193,7,0.5)); }
+.star-rating.readonly i { cursor: default; }
+.star-rating.readonly i:hover { transform: none; }
+
+/* ============================ 20.12 IMPROVED FORMS ============================ */
+.form-input.is-invalid {
+    border-color: var(--danger) !important;
+    box-shadow: 0 0 0 3px var(--danger-subtle) !important;
+}
+.form-input.is-valid {
+    border-color: var(--primary) !important;
+}
+.form-error {
+    display: block;
+    margin-top: 6px;
+    color: var(--danger);
+    font-size: 11px;
+    font-weight: 500;
+    animation: shakeIn 0.4s ease;
+}
+@keyframes shakeIn {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    75% { transform: translateX(4px); }
+}
+
+/* Password strength meter */
+.pw-strength {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-color);
+    overflow: hidden;
+    margin-top: 8px;
+}
+.pw-strength-bar {
+    height: 100%;
+    transition: width 0.3s ease, background 0.3s ease;
+    border-radius: 2px;
+}
+.pw-strength-bar.weak { width: 33%; background: var(--danger); }
+.pw-strength-bar.medium { width: 66%; background: var(--warning); }
+.pw-strength-bar.strong { width: 100%; background: var(--primary); }
+
+/* ============================ 20.13 ENHANCED DIVIDERS ============================ */
+.divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-color), transparent);
+    margin: 20px 0;
+    border: none;
+}
+.divider-text {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    font-weight: 700;
+    margin: 20px 0;
+}
+.divider-text::before,
+.divider-text::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border-color);
+}
+
+/* ============================ 20.14 GRADIENT BUTTONS ============================ */
+.btn-gradient {
+    background: linear-gradient(135deg, #00d4a0 0%, #4F46E5 100%);
+    color: #fff;
+    box-shadow: 0 4px 16px rgba(79, 70, 229, 0.4);
+}
+.btn-gradient:hover {
+    background: linear-gradient(135deg, #00b88a 0%, #4338CA 100%);
+    box-shadow: 0 6px 24px rgba(79, 70, 229, 0.5);
+    color: #fff;
+}
+
+/* Outline primary button */
+.btn-outline {
+    background: transparent;
+    color: var(--primary);
+    border: 1.5px solid var(--primary);
+}
+.btn-outline:hover {
+    background: var(--primary-subtle);
+    color: var(--primary);
+}
+
+/* Ghost button */
+.btn-ghost {
+    background: transparent;
+    color: var(--text-sub);
+    border: none;
+}
+.btn-ghost:hover {
+    background: var(--bg-card);
+    color: var(--text-main);
+}
+
+/* ============================ 20.15 GLOW EFFECTS ============================ */
+.glow-primary { box-shadow: 0 0 24px var(--primary-glow); }
+.glow-danger { box-shadow: 0 0 24px rgba(255, 77, 77, 0.4); }
+.text-glow {
+    text-shadow: 0 0 12px var(--primary-glow);
+}
+
+/* Animated glow ring for special elements */
+.glow-ring {
+    position: relative;
+}
+.glow-ring::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    background: conic-gradient(from 0deg, var(--primary), transparent, var(--primary));
+    z-index: -1;
+    animation: glowRotate 3s linear infinite;
+}
+@keyframes glowRotate {
+    to { transform: rotate(360deg); }
+}
+
+/* ============================ 20.16 TEXT GRADIENT UTILITIES ============================ */
+.text-gradient-primary {
+    background: linear-gradient(135deg, var(--primary) 0%, #4F46E5 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.text-gradient-gold {
+    background: linear-gradient(135deg, #ffc107 0%, #ff6b6b 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* ============================ 20.17 TOOLTIP ============================ */
+.tooltip {
+    position: relative;
+}
+.tooltip::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%) scale(0.9);
+    background: var(--bg-elevated);
+    color: var(--text-main);
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: all var(--transition-fast);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-md);
+    z-index: 100;
+}
+.tooltip:hover::after {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+}
+
+/* ============================ 20.18 PULL-TO-REFRESH INDICATOR ============================ */
+.ptr-indicator {
+    position: absolute;
+    top: calc(80px + var(--safe-top));
+    left: 50%;
+    transform: translateX(-50%) translateY(-60px);
+    padding: 8px 16px;
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--primary);
+    border-radius: var(--radius-pill);
+    color: var(--primary);
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    z-index: 90;
+    box-shadow: 0 4px 16px var(--primary-glow);
+}
+.ptr-indicator.active {
+    transform: translateX(-50%) translateY(0);
+}
+.ptr-indicator i {
+    animation: spin 1s linear infinite;
+}
+
+/* ============================ 20.19 BOTTOM SHEET IMPROVEMENTS ============================ */
+.modal-content {
+    scrollbar-width: thin;
+}
+.modal-content::-webkit-scrollbar {
+    width: 4px;
+}
+.modal-content::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 2px;
+}
+
+/* Bottom sheet drag handle (bigger, tappable) */
+.modal-content::before {
+    width: 50px;
+    height: 5px;
+    background: linear-gradient(90deg, transparent, var(--border-color), transparent);
+}
+
+/* Modal open animation for content */
+.modal-content > * {
+    animation: modalContentIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) backwards;
+}
+.modal-content > *:nth-child(1) { animation-delay: 0.02s; }
+.modal-content > *:nth-child(2) { animation-delay: 0.05s; }
+.modal-content > *:nth-child(3) { animation-delay: 0.08s; }
+.modal-content > *:nth-child(4) { animation-delay: 0.11s; }
+@keyframes modalContentIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================ 20.20 ENHANCED TOASTS ============================ */
+.toast {
+    position: relative;
+    overflow: hidden;
+}
+.toast::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 3px;
+    height: 100%;
+    background: var(--primary);
+    border-radius: var(--radius-pill) 0 0 var(--radius-pill);
+}
+.toast.error::before { background: var(--danger); }
+.toast.warning::before { background: var(--warning); }
+.toast.success::before { background: var(--primary); }
+
+/* Progress bar for auto-dismiss toast */
+.toast::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0;
+    height: 2px;
+    width: 100%;
+    background: currentColor;
+    opacity: 0.3;
+    animation: toastProgress 2.4s linear forwards;
+}
+@keyframes toastProgress {
+    from { width: 100%; }
+    to { width: 0%; }
+}
+
+/* ============================ 20.21 LISTS WITH ANIMATION ============================ */
+.list-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-subtle);
+    transition: background var(--transition-fast);
+    cursor: pointer;
+}
+.list-item:hover { background: var(--bg-card); margin: 0 -8px; padding-left: 8px; padding-right: 8px; border-radius: var(--radius-sm); }
+.list-item:last-child { border-bottom: none; }
+.list-item-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    background: var(--bg-card-hover);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary);
+    font-size: 16px;
+    flex-shrink: 0;
+}
+.list-item-content { flex: 1; min-width: 0; }
+.list-item-title { font-size: 14px; font-weight: 600; color: var(--text-main); }
+.list-item-sub { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
+.list-item-trail { color: var(--text-muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+
+/* ============================ 20.22 SKELETON VARIANTS ============================ */
+.skeleton-circle {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.skeleton-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.skeleton-badge {
+    width: 60px;
+    height: 20px;
+    border-radius: var(--radius-pill);
+}
+.skeleton-line {
+    height: 12px;
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+.skeleton-line.short { width: 40%; }
+.skeleton-line.medium { width: 70%; }
+.skeleton-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 16px;
+}
+.skeleton-row .skeleton-lines { flex: 1; }
+
+/* ============================ 20.23 COLOR UTILITY ============================ */
+.text-primary { color: var(--primary) !important; }
+.text-danger { color: var(--danger) !important; }
+.text-warning { color: var(--warning) !important; }
+.text-info { color: var(--info) !important; }
+.text-muted { color: var(--text-muted) !important; }
+
+.bg-primary-subtle { background: var(--primary-subtle); }
+.bg-card { background: var(--bg-card); }
+.bg-glass {
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+/* ============================ 20.24 SPACING HELPERS ============================ */
+.p-1 { padding: 4px; } .p-2 { padding: 8px; } .p-3 { padding: 12px; } .p-4 { padding: 16px; }
+.mx-auto { margin-left: auto; margin-right: auto; }
+.gap-1 { gap: 4px; } .gap-3 { gap: 12px; } .gap-4 { gap: 16px; }
+
+/* ============================ 20.25 ASPECT RATIOS ============================ */
+.aspect-square { aspect-ratio: 1 / 1; }
+.aspect-video { aspect-ratio: 16 / 9; }
+.aspect-card { aspect-ratio: 4 / 3; }
+
+/* ============================ 20.26 TRUNCATION HELPERS ============================ */
+.truncate {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* ============================ 20.27 LIVE INDICATOR PULSE ============================ */
+.live-pulse {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--primary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.live-pulse::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--primary);
+    box-shadow: 0 0 0 0 var(--primary);
+    animation: livePulse 1.8s infinite;
+}
+@keyframes livePulse {
+    0% { box-shadow: 0 0 0 0 rgba(0, 212, 160, 0.7); }
+    70% { box-shadow: 0 0 0 10px rgba(0, 212, 160, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(0, 212, 160, 0); }
+}
+
+/* ============================ 20.28 SCREEN FLASH FOR ERRORS ============================ */
+.flash-danger {
+    animation: flashDanger 0.6s ease;
+}
+@keyframes flashDanger {
+    0%, 100% { background-color: transparent; }
+    50% { background-color: rgba(255, 77, 77, 0.15); }
+}
+
+/* ============================ 20.29 SWIPE INDICATOR ============================ */
+.swipe-hint {
+    position: absolute;
+    bottom: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    color: var(--text-muted);
+    animation: swipeBounce 2s infinite;
+}
+@keyframes swipeBounce {
+    0%, 100% { transform: translateX(-50%) translateY(0); opacity: 0.5; }
+    50% { transform: translateX(-50%) translateY(-4px); opacity: 1; }
+}
+
+/* ============================ 20.30 SCREEN READER ONLY ============================ */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
 }
