@@ -1,9 +1,8 @@
 /**
  * ============================================================================
- * STEERADAR FRONTEND CONTROLLER (v10.1)
+ * STEERADAR FRONTEND CONTROLLER (v11.0)
  * ============================================================================
- * Fix: OTP timeout handling — opens OTP modal even when request times out,
- * because GAS takes 10-15s to send email.
+ * Compressed + sequential image uploads with descriptive filenames.
  * ============================================================================
  */
 
@@ -74,7 +73,7 @@ const DOM = {
 document.addEventListener('DOMContentLoaded', async () => {
     logger.init();
 
-    console.log('%c SteerRadar v10.1 booted ',
+    console.log('%c SteerRadar v11.0 booted ',
         'background:#00d4a0;color:#000;font-weight:800;padding:4px 10px;border-radius:4px;');
 
     setupEventListeners();
@@ -120,7 +119,7 @@ function setupEventListeners() {
 }
 
 // ============================================================================
-// LOGO LONG-PRESS → DEBUG LOG
+// LOGO LONG-PRESS
 // ============================================================================
 function setupLogoLongPress() {
     const logo = DOM.logoTrigger;
@@ -142,9 +141,7 @@ function setupLogoLongPress() {
         }, 800);
     };
 
-    const cancel = () => {
-        if (timer) { clearTimeout(timer); timer = null; }
-    };
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
 
     const move = (e) => {
         if (!timer) return;
@@ -161,7 +158,6 @@ function setupLogoLongPress() {
     logo.addEventListener('mouseup', cancel);
     logo.addEventListener('mouseleave', cancel);
     logo.addEventListener('mousemove', move);
-
     logo.addEventListener('contextmenu', (e) => e.preventDefault());
 
     logo.addEventListener('click', () => {
@@ -186,12 +182,8 @@ function setupNetworkHandlers() {
 
 function setupVisibilityHandlers() {
     document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            stopPolling();
-        } else {
-            startAutoRefresh();
-            refreshAll();
-        }
+        if (document.hidden) stopPolling();
+        else { startAutoRefresh(); refreshAll(); }
     });
 }
 
@@ -251,9 +243,6 @@ async function handleSignIn(e) {
     }
 }
 
-// ============================================================================
-// SIGNUP STEP 1 — Send OTP with timeout-aware handling
-// ============================================================================
 async function handleSignupStep1(e) {
     e.preventDefault();
     const data = {
@@ -279,11 +268,8 @@ async function handleSignupStep1(e) {
     const res = await api.sendOtp(data.phone, data.email, 'register');
     resetButton(btn, 'Send OTP');
 
-    // Handle timeout/abort gracefully — the OTP email is likely already on its way
     const lastErr = api.lastError || '';
-    const timedOut = lastErr.includes('Timed out') ||
-                     lastErr.includes('aborted') ||
-                     lastErr.includes('Failed to fetch');
+    const timedOut = lastErr.includes('Timed out') || lastErr.includes('aborted') || lastErr.includes('Failed to fetch');
 
     if (res && res.ok) {
         document.getElementById('otp-message').textContent =
@@ -291,7 +277,6 @@ async function handleSignupStep1(e) {
         openModal('otp-modal');
         setTimeout(() => document.getElementById('otp-code')?.focus(), 300);
     } else if (res && res.error === 'cooldown') {
-        // OTP was recently sent — let user enter the code
         document.getElementById('otp-message').textContent =
             `An OTP was recently sent to ${data.email}. Enter the 6-digit code here.`;
         openModal('otp-modal');
@@ -301,7 +286,6 @@ async function handleSignupStep1(e) {
     } else if (res && res.error === 'email_taken') {
         showToast('This email is already registered. Please sign in.', 'warning');
     } else if (timedOut) {
-        // Network timed out — email probably went through anyway
         document.getElementById('otp-message').textContent =
             `If you received a code at ${data.email}, enter it below. (Check spam folder too.)`;
         openModal('otp-modal');
@@ -311,9 +295,6 @@ async function handleSignupStep1(e) {
     }
 }
 
-// ============================================================================
-// VERIFY OTP
-// ============================================================================
 window.verifyOTP = async () => {
     const code = document.getElementById('otp-code').value.trim();
     if (!code || code.length !== 6) return showToast('Enter a valid 6-digit code', 'warning');
@@ -843,7 +824,7 @@ window.handleFABClick = () => {
 };
 
 // ============================================================================
-// 17. CREATE LANE
+// 17. CREATE LANE — compressed + named
 // ============================================================================
 async function handleCreateLane(e) {
     e.preventDefault();
@@ -855,8 +836,15 @@ async function handleCreateLane(e) {
         let photoUrl = '';
 
         if (photoFile) {
-            const b64 = await fileToBase64(photoFile);
-            const upload = await api.uploadImage(b64, 'lanes');
+            setButtonLoading(btn, 'Compressing photo...');
+            const b64 = await compressImage(photoFile, 800, 0.7);
+            const title = sanitizeFilename(document.getElementById('lane-title').value.trim(), 20) || 'lane';
+            setButtonLoading(btn, 'Uploading photo...');
+            const upload = await api.uploadImage(
+                b64,
+                'lanes',
+                `lane_${title}_${state.user.phone}_${Date.now()}`
+            );
             if (upload?.url) photoUrl = upload.url;
         }
 
@@ -888,7 +876,7 @@ async function handleCreateLane(e) {
 }
 
 // ============================================================================
-// 18. CREATE HIVE POST
+// 18. CREATE HIVE POST — compressed + named
 // ============================================================================
 async function handleCreateHivePost(e) {
     e.preventDefault();
@@ -909,8 +897,14 @@ async function handleCreateHivePost(e) {
         let mediaUrl = '';
 
         if (photoFile) {
-            const b64 = await fileToBase64(photoFile);
-            const upload = await api.uploadImage(b64, 'hive');
+            setButtonLoading(btn, 'Compressing photo...');
+            const b64 = await compressImage(photoFile, 900, 0.75);
+            setButtonLoading(btn, 'Uploading photo...');
+            const upload = await api.uploadImage(
+                b64,
+                'hive',
+                `hive_${state.user.phone}_${Date.now()}`
+            );
             if (upload?.url) { photoUrl = upload.url; mediaType = 'image'; }
         } else if (embedUrl) {
             mediaUrl = embedUrl;
@@ -945,7 +939,7 @@ async function handleCreateHivePost(e) {
 }
 
 // ============================================================================
-// 19. EDIT PROFILE
+// 19. EDIT PROFILE — compressed + named avatar
 // ============================================================================
 window.openEditProfile = () => {
     if (!state.user) return;
@@ -964,8 +958,13 @@ async function handleEditProfile(e) {
         let photoUrl = state.user.photo || '';
 
         if (avatarFile) {
-            const b64 = await fileToBase64(avatarFile);
-            const upload = await api.uploadImage(b64, 'avatars');
+            setButtonLoading(btn, 'Uploading avatar...');
+            const b64 = await compressImage(avatarFile, 400, 0.8);
+            const upload = await api.uploadImage(
+                b64,
+                'avatars',
+                `avatar_${sanitizeFilename(state.user.name, 15)}_${state.user.phone}_${Date.now()}`
+            );
             if (upload?.url) photoUrl = upload.url;
         }
 
@@ -993,12 +992,12 @@ async function handleEditProfile(e) {
 }
 
 // ============================================================================
-// 20. STEERAGENT APPLICATION
+// 20. STEERAGENT APPLICATION — compressed + sequential + named
 // ============================================================================
 async function handleSteerAgentApplication(e) {
     e.preventDefault();
     const btn = e.target.querySelector('button[type="submit"]');
-    setButtonLoading(btn, 'Uploading documents...');
+    setButtonLoading(btn, 'Preparing...');
 
     try {
         const licenseFile = document.getElementById('sa-license').files[0];
@@ -1009,18 +1008,50 @@ async function handleSteerAgentApplication(e) {
             throw new Error('Please upload all required documents');
         }
 
-        const [licenseRes, rcRes, selfieRes] = await Promise.all([
-            api.uploadImage(await fileToBase64(licenseFile), 'vehicles'),
-            api.uploadImage(await fileToBase64(rcFile), 'vehicles'),
-            api.uploadImage(await fileToBase64(selfieFile), 'avatars')
-        ]);
+        const vehicleNum = sanitizeFilename(
+            document.getElementById('sa-vehicle-number').value.trim().toUpperCase(),
+            15
+        ) || 'vehicle';
+        const phone = state.user.phone || 'unknown';
+        const name = sanitizeFilename(state.user.name, 15);
+        const timestamp = Date.now();
 
-        if (!licenseRes || !rcRes || !selfieRes) {
-            throw new Error('Document upload failed. Please try again.');
+        setButtonLoading(btn, 'Compressing photos...');
+        const licenseB64 = await compressImage(licenseFile, 800, 0.7);
+        const rcB64 = await compressImage(rcFile, 800, 0.7);
+        const selfieB64 = await compressImage(selfieFile, 800, 0.7);
+
+        setButtonLoading(btn, 'Uploading license (1/3)...');
+        const licenseRes = await api.uploadImage(
+            licenseB64,
+            'vehicles',
+            `license_${vehicleNum}_${phone}_${timestamp}`
+        );
+        if (!licenseRes || !licenseRes.url) {
+            throw new Error('License upload failed. Try a smaller image.');
+        }
+
+        setButtonLoading(btn, 'Uploading RC (2/3)...');
+        const rcRes = await api.uploadImage(
+            rcB64,
+            'vehicles',
+            `rc_${vehicleNum}_${phone}_${timestamp}`
+        );
+        if (!rcRes || !rcRes.url) {
+            throw new Error('RC upload failed. Try a smaller image.');
+        }
+
+        setButtonLoading(btn, 'Uploading selfie (3/3)...');
+        const selfieRes = await api.uploadImage(
+            selfieB64,
+            'avatars',
+            `selfie_${name}_${phone}_${timestamp}`
+        );
+        if (!selfieRes || !selfieRes.url) {
+            throw new Error('Selfie upload failed. Try a smaller image.');
         }
 
         setButtonLoading(btn, 'Submitting application...');
-
         const payload = {
             vehicle: document.getElementById('sa-vehicle-number').value.trim(),
             vehicleType: document.getElementById('sa-vehicle-type').value,
@@ -1450,6 +1481,43 @@ function fileToBase64(file) {
         reader.onload = () => resolve(reader.result);
         reader.onerror = reject;
     });
+}
+
+/**
+ * Compress an image client-side before upload.
+ * Resizes to max 800px on the longest side, JPEG at 70% quality.
+ * Reduces a 4MB phone photo to ~150KB.
+ */
+function compressImage(file, maxDim = 800, quality = 0.7) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (ev) => {
+            const img = new Image();
+            img.onload = () => {
+                let { width, height } = img;
+                if (width > height) {
+                    if (width > maxDim) { height = Math.round(height * maxDim / width); width = maxDim; }
+                } else {
+                    if (height > maxDim) { width = Math.round(width * maxDim / height); height = maxDim; }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL('image/jpeg', quality));
+            };
+            img.onerror = () => reject(new Error('Image load failed'));
+            img.src = ev.target.result;
+        };
+        reader.onerror = () => reject(new Error('File read failed'));
+    });
+}
+
+/** Sanitize a string for use in a filename */
+function sanitizeFilename(s, max = 20) {
+    return String(s || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, max) || 'file';
 }
 
 function escapeHTML(str) {
