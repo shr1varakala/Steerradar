@@ -1,31 +1,23 @@
-// config.js - Steeradar shared configuration
 window.STEERADAR = {
-  // Backend URL only - no secret. v8.4 uses per-user tokens.
   SHEET_API_URL: 'https://script.google.com/macros/s/AKfycbxwCZtpRay_3Rq9mXIjKHm2p1S4vicQPYJFX8F5Xn1wXm3mH5iMnAdSEu_mwd7gIhm1/exec',
 
   CLOUD_SYNC_DEFAULT: true,
   APP_NAME: 'Steeradar',
-  APP_VERSION: 'v1.0',
-  LOGO_URL: './steeradar-logo.png', // Fixed typo
+  APP_VERSION: 'v10.0',
+  LOGO_URL: 'https://raw.githubusercontent.com/suryasticsai/Steeradar/main/steeradar-logo.png',
 
-  // Updated to Hyderabad
-  MAP_STYLE_BRIGHT: 'https://tiles.openfreemap.org/styles/bright',
-  MAP_STYLE_DARK:   'https://tiles.openfreemap.org/styles/dark',
-  DEFAULT_CENTER:   { lat: 17.3850, lng: 78.4867 }, // Hyderabad Coordinates
-  DEFAULT_ZOOM:     13,
+  MAP_STYLE_DARK: 'https://tiles.openfreemap.org/styles/dark',
+  DEFAULT_CENTER: { lat: 17.3850, lng: 78.4867 },
+  DEFAULT_ZOOM: 13,
 
-  CLOUD_POLL_INTERVAL_MS: 15000,
-  PRESENCE_INTERVAL_MS:   20000,
-  TOAST_DURATION_MS:      2400,
-  LOCAL_ROOM_SLOTS:       20,
-  GEOHASH_PRECISION:      6,
+  TOAST_DURATION_MS: 2400,
 
   VEHICLE_TYPES: [
-    { id: 'bus',   label: 'Bus',   emoji: '🚌', seats: 40, color: '#0D9488' },
-    { id: 'car',   label: 'Car',   emoji: '🚗', seats: 4,  color: '#4F46E5' },
-    { id: 'auto',  label: 'Auto',  emoji: '🛺', seats: 3,  color: '#D97706' },
-    { id: 'bike',  label: 'Bike',  emoji: '🏍️', seats: 1,  color: '#DC2626' },
-    { id: 'walk',  label: 'Walk',  emoji: '🚶', seats: 1,  color: '#7C3AED' },
+    { id: 'bus', label: 'Bus', emoji: '🚌', seats: 40, color: '#0D9488' },
+    { id: 'car', label: 'Car', emoji: '🚗', seats: 4, color: '#4F46E5' },
+    { id: 'auto', label: 'Auto', emoji: '🛺', seats: 3, color: '#D97706' },
+    { id: 'bike', label: 'Bike', emoji: '🏍️', seats: 1, color: '#DC2626' },
+    { id: 'walk', label: 'Walk', emoji: '🚶', seats: 1, color: '#7C3AED' },
     { id: 'event', label: 'Event', emoji: '🎉', seats: 20, color: '#DB2777' },
   ],
 };
