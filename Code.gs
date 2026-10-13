@@ -1,9 +1,10 @@
 /**
- * Steeradar backend — v8.2
- * Clean, verified, welcome email with personal note from SteerMan
+ * Steeradar backend — v8.3
+ * Full-featured: Password + OTP auth, SteerAgent flow, Admin panel,
+ * Saved map points, beautiful welcome email with personal note from SteerMan.
  */
 
-const VERSION = '8.2';
+const VERSION = '8.3';
 const APP_NAME = 'Steeradar';
 const APP_URL = 'https://suryasticsai.github.io/Steeradar/';
 const LOGO_URL = 'https://raw.githubusercontent.com/suryasticsai/Steeradar/main/steerardar-logo.png';
@@ -23,38 +24,47 @@ const OTP_COOLDOWN_MS = 45000;
 const LANE_TTL_MS = 24 * 3600 * 1000;
 const PRESENCE_TTL_MS = 2 * 60 * 1000;
 const MAX_BODY_CHARS = 1200000;
-const VEHICLE_TYPES = ['bus', 'car', 'auto', 'bike', 'walk', 'event'];
-const PHOTO_SLOTS = ['avatar', 'vehiclePhoto', 'platePhoto', 'upiQr'];
+const MAX_POINTS_PER_USER = 200;
+const PW_MIN = 6;
+const PW_MAX = 100;
+const VEHICLE_TYPES = ['bus', 'car', 'auto', 'bike', 'walk', 'event', 'two-wheeler'];
+const PHOTO_SLOTS = ['avatar', 'vehiclePhoto', 'platePhoto', 'upiQr', 'selfie', 'license', 'rc'];
 
 const SCHEMA = {
-  users:      ['phone','email','name','username','vehicle','vehicleType',
-               'avatarId','vehiclePhotoId','platePhotoId','upiQrId',
-               'community','role','status',
-               'laneCount','tripCount','ratingSum','ratingCount',
-               'createdAt','lastLogin','device'],
-  sessions:   ['tokenHash','phone','type','createdAt','expiresAt','device','lastSeen'],
-  magic:      ['tokenHash','phone','createdAt','expiresAt','consumed'],
-  otps:       ['id','phone','email','purpose','codeHash','createdAt',
-               'expiresAt','attempts','verifiedAt','consumed'],
-  lanes:      ['id','ownerPhone','driver','vehicle','vehicleType','community',
-               'from','via','to','total','taken','fare','lat','lng',
-               'status','ts','peerId','lastSeen','showPlate'],
-  hive:       ['id','ownerPhone','name','avatar','community',
-               'title','text','tags','time','likes','ts','vehicle'],
-  likes:      ['key','postId','phone','ts'],
-  messages:   ['id','roomId','roomType','fromVehicle','fromPhone',
-               'sender','text','seq','ts'],
-  presence:   ['vehicle','phone','name','avatar','peerId','vehicleType',
-               'lat','lng','lastSeen'],
-  trips:      ['id','phone','laneId','driverPhone','startTs','endTs',
-               'distance','fare','status','notes'],
-  ratings:    ['id','tripId','fromPhone','toPhone','stars','comment','ts'],
-  reports:    ['id','reporterPhone','targetPhone','targetVehicle',
-               'reason','detail','status','ts','resolvedAt'],
-  blocks:     ['ownerPhone','blockedPhone','ts'],
-  communities:['id','name','city','adminPhone','memberCount','createdAt','status'],
-  members:    ['community','phone','joinedAt'],
-  audit:      ['ts','phone','action','detail'],
+  users:        ['phone','email','name','username','vehicle','vehicleType',
+                 'avatarId','vehiclePhotoId','platePhotoId','upiQrId',
+                 'community','role','status','agentStatus',
+                 'laneCount','tripCount','ratingSum','ratingCount',
+                 'passHash','salt',
+                 'createdAt','lastLogin','device'],
+  sessions:     ['tokenHash','phone','type','createdAt','expiresAt','device','lastSeen'],
+  magic:        ['tokenHash','phone','createdAt','expiresAt','consumed'],
+  otps:         ['id','phone','email','purpose','codeHash','createdAt',
+                 'expiresAt','attempts','verifiedAt','consumed'],
+  applications: ['id','phone','name','vehicle','vehicleType','vehiclePhotoId',
+                 'platePhotoId','selfieId','upiId','agreement','status','notes',
+                 'appliedAt','reviewedAt','reviewedBy'],
+  lanes:        ['id','ownerPhone','driver','vehicle','vehicleType','community',
+                 'from','via','to','total','taken','fare','lat','lng',
+                 'status','ts','peerId','lastSeen','showPlate'],
+  hive:         ['id','ownerPhone','name','avatar','community',
+                 'title','text','tags','time','likes','ts','vehicle'],
+  likes:        ['key','postId','phone','ts'],
+  messages:     ['id','roomId','roomType','fromVehicle','fromPhone',
+                 'sender','text','seq','ts'],
+  presence:     ['vehicle','phone','name','avatar','peerId','vehicleType',
+                 'lat','lng','lastSeen'],
+  trips:        ['id','phone','laneId','driverPhone','startTs','endTs',
+                 'distance','fare','status','notes'],
+  ratings:      ['id','tripId','fromPhone','toPhone','stars','comment','ts'],
+  reports:      ['id','reporterPhone','targetPhone','targetVehicle',
+                 'reason','detail','status','ts','resolvedAt'],
+  blocks:       ['ownerPhone','blockedPhone','ts'],
+  communities:  ['id','name','city','adminPhone','memberCount','createdAt','status'],
+  members:      ['community','phone','joinedAt'],
+  points:       ['id','ownerPhone','ownerName','label','note','category',
+                 'lat','lng','shared','createdAt','updatedAt'],
+  audit:        ['ts','phone','action','detail'],
 };
 
 class ApiError extends Error {
@@ -129,6 +139,18 @@ function pepper() {
 
 function newToken() {
   return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
+}
+
+function newSalt() {
+  return Utilities.getUuid().replace(/-/g, '').slice(0, 32);
+}
+
+function hashPassword(pw, salt) {
+  let h = salt + ':' + pw + ':' + pepper();
+  for (let i = 0; i < 200; i++) {
+    h = sha256Hex(h + salt);
+  }
+  return h;
 }
 
 function shortId(prefix) {
@@ -301,9 +323,6 @@ function buildOtp(code, purpose) {
   return emailShell(body);
 }
 
-/**
- * Beautiful personalized welcome email with personal note from SteerMan.
- */
 function buildWelcome(email, name, vehicle, community, phone) {
   const firstName = escapeHtml((name || 'Driver').split(' ')[0]);
   const safeEmail = escapeHtml(email || '');
@@ -311,7 +330,6 @@ function buildWelcome(email, name, vehicle, community, phone) {
   const safeVehicle = escapeHtml(vehicle || '');
   const safeCommunity = escapeHtml(community || 'Not specified');
 
-  // Personal Note from SteerMan
   const personalNoteHTML = `
     <div style="margin: 28px 0; padding: 20px; border-left: 4px solid ${CORAL}; background: linear-gradient(135deg, #FEF2F2 0%, #FFF5F5 100%); border-radius: 0 10px 10px 0;">
       <div style="display:block; margin-bottom:12px;">
@@ -327,7 +345,6 @@ function buildWelcome(email, name, vehicle, community, phone) {
     </div>
   `;
 
-  // User Details Section
   const userDetailsHTML = `
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0 0; background:#F8F9FB; border-radius:14px; border: 1px solid #E5E7EB;">
       <tr><td style="padding: 20px 22px;">
@@ -342,7 +359,6 @@ function buildWelcome(email, name, vehicle, community, phone) {
     </table>
   `;
 
-  // Thank You Section
   const thankYouHTML = `
     <div style="margin: 28px 0 0; padding: 20px; text-align: center; background: linear-gradient(135deg, ${TEAL} 0%, ${TEAL2} 100%); border-radius: 12px;">
       <p style="margin: 0; color: #FFFFFF; font-size: 16px; font-weight: 700; line-height: 1.5;">
@@ -354,28 +370,64 @@ function buildWelcome(email, name, vehicle, community, phone) {
     </div>
   `;
 
-  // Assemble Full Body
   const body = `
     <h1 style="margin:0 0 10px;color:${INK};font-size:26px;font-weight:800;letter-spacing:-0.4px;">Welcome aboard, ${firstName}! 🎉</h1>
     <p style="margin:0 0 26px;color:${MUTED};font-size:15px;line-height:1.6;">
       Your Steeradar account is ready${community ? ' in <strong style="color:' + INK + ';">' + escapeHtml(community) + '</strong>' : ''}. Here's what you can do now:
     </p>
-    
     ${featureTile('🚌', 'Post your lane', 'Share your route and available seats')}
     ${featureTile('💬', 'Chat with drivers', 'Real-time peer-to-peer messaging')}
     ${featureTile('📍', 'Track live', 'See vehicles approaching in real time')}
     ${featureTile('⭐', 'Build trust', 'Rate and get rated after each ride')}
-    
     ${personalNoteHTML}
     ${userDetailsHTML}
     ${thankYouHTML}
-    
     <p style="margin: 24px 0 0; color: ${SOFT}; font-size: 12px; line-height: 1.7; text-align: center;">
       Need help? Just reply to this email or find us in the Hive.<br>
       We're always here for you.
     </p>
   `;
 
+  return emailShell(body);
+}
+
+function buildAgentApproved(name) {
+  const firstName = escapeHtml((name || 'Driver').split(' ')[0]);
+  const body = `
+    <h1 style="margin:0 0 10px;color:${INK};font-size:26px;font-weight:800;letter-spacing:-0.4px;">You're a SteerAgent now! 🎉</h1>
+    <p style="margin:0 0 22px;color:${MUTED};font-size:15px;line-height:1.6;">
+      Congratulations ${firstName}! Your application has been reviewed and <strong style="color:${TEAL};">approved</strong>.
+    </p>
+    <div style="background: linear-gradient(135deg, #F0FDFA 0%, #ECFDF5 100%); border: 1px solid ${TEAL}; border-radius: 12px; padding: 20px; margin: 20px 0;">
+      <div style="color:${TEAL}; font-size:11px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; margin-bottom:10px;">✓ Unlocked Features</div>
+      <p style="margin:6px 0; color:${INK}; font-size:14px;">🚌 Post your own lanes</p>
+      <p style="margin:6px 0; color:${INK}; font-size:14px;">💰 Accept payments via UPI</p>
+      <p style="margin:6px 0; color:${INK}; font-size:14px;">👻 Ghost mode & alerts</p>
+      <p style="margin:6px 0; color:${INK}; font-size:14px;">📊 Trip tracking & history</p>
+    </div>
+    <div style="text-align:center; margin: 28px 0;">
+      <a href="${APP_URL}" style="display:inline-block; background:${TEAL}; color:#FFFFFF; font-weight:800; font-size:15px; padding:14px 36px; border-radius:12px; text-decoration:none;">Start Driving</a>
+    </div>
+  `;
+  return emailShell(body);
+}
+
+function buildAgentRejected(name, reason) {
+  const firstName = escapeHtml((name || 'Driver').split(' ')[0]);
+  const safeReason = escapeHtml(reason || 'Documents were not valid.');
+  const body = `
+    <h1 style="margin:0 0 10px;color:${INK};font-size:24px;font-weight:800;">Application Update</h1>
+    <p style="margin:0 0 22px;color:${MUTED};font-size:15px;line-height:1.6;">
+      Hi ${firstName}, we reviewed your SteerAgent application but couldn't approve it at this time.
+    </p>
+    <div style="background:#FEF2F2; border-left: 4px solid ${CORAL}; border-radius: 0 10px 10px 0; padding: 16px 20px; margin: 20px 0;">
+      <div style="color:${CORAL}; font-size:11px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; margin-bottom:8px;">Reason</div>
+      <p style="margin:0; color:${INK}; font-size:14px; line-height:1.6;">${safeReason}</p>
+    </div>
+    <p style="margin:22px 0 0;color:${MUTED};font-size:14px;line-height:1.6;">
+      You can update your documents and apply again anytime from your profile.
+    </p>
+  `;
   return emailShell(body);
 }
 
@@ -438,8 +490,20 @@ function sendOtpEmail(to, code, purpose) {
 
 function sendWelcomeEmail(to, name, vehicle, community, phone, email) {
   const subject = '🎉 Welcome to Steeradar, ' + ((name || '').split(' ')[0] || 'friend') + '!';
-  const plain = 'Welcome ' + name + '! Your vehicle ' + vehicle + ' is now linked to Steeradar. User ID: ' + phone + '. Thanks for joining!';
+  const plain = 'Welcome ' + name + '! Your vehicle ' + vehicle + ' is now linked. User ID: ' + phone + '.';
   return sendMail(to, subject, buildWelcome(email || to, name, vehicle, community, phone), plain);
+}
+
+function sendAgentApprovedEmail(to, name) {
+  const subject = '🎉 You\'re a SteerAgent now!';
+  const plain = 'Congratulations ' + name + '! Your SteerAgent application has been approved.';
+  return sendMail(to, subject, buildAgentApproved(name), plain);
+}
+
+function sendAgentRejectedEmail(to, name, reason) {
+  const subject = '📝 Update on your SteerAgent application';
+  const plain = 'Hi ' + name + '. Your application needs attention: ' + reason;
+  return sendMail(to, subject, buildAgentRejected(name, reason), plain);
 }
 
 function sendReceiptEmail(to, driver, from, to_, distance, fare, duration) {
@@ -477,6 +541,15 @@ function findUserByVehicle(vehicle) {
   return null;
 }
 
+function findUserByEmail(email) {
+  const e = String(email || '').toLowerCase();
+  const users = readAll('users');
+  for (let i = 0; i < users.length; i++) {
+    if ((users[i].email || '').toLowerCase() === e) return users[i];
+  }
+  return null;
+}
+
 function userByToken(body) {
   const phone = String(body.phone || '');
   const token = String(body.token || '');
@@ -502,6 +575,19 @@ function requireUser(body) {
   return u;
 }
 
+function isAdmin_(u) {
+  if (!u) return false;
+  if (u.role === 'admin') return true;
+  const list = (PropertiesService.getScriptProperties().getProperty('ADMIN_PHONES') || '').split(',');
+  return list.map(function (s) { return s.replace(/\D/g, '').slice(-10); }).indexOf(u.phone) >= 0;
+}
+
+function requireAdmin(body) {
+  const u = requireUser(body);
+  if (!isAdmin_(u)) throw new ApiError('forbidden', 'Admin access required');
+  return u;
+}
+
 function createSession(phone, device) {
   const token = newToken();
   const t = now();
@@ -518,6 +604,7 @@ function createSession(phone, device) {
 }
 
 function publicSelf(u) {
+  const isAgent = u.role === 'agent' && u.agentStatus === 'active';
   return {
     phone: u.phone,
     email: u.email,
@@ -531,6 +618,9 @@ function publicSelf(u) {
     upiQrId: u.upiQrId,
     community: u.community || '',
     role: u.role || 'user',
+    agentStatus: u.agentStatus || '',
+    isAgent: isAgent,
+    isAdmin: isAdmin_(u),
     rating: Number(u.ratingCount) > 0
       ? Math.round((Number(u.ratingSum) / Number(u.ratingCount)) * 10) / 10
       : 5.0
@@ -688,6 +778,10 @@ H.verifyOtp = function (b) {
   return { ok: true };
 };
 
+/**
+ * REGISTER — accepts phone, name, username, vehicle, optional password.
+ * Password is stored as hash + salt. If omitted, user can log in via OTP only.
+ */
 H.register = function (b) {
   const phone = String(b.phone || '');
   if (!isPhone(phone)) throw new ApiError('bad_phone');
@@ -699,21 +793,35 @@ H.register = function (b) {
   if (email !== otp.email) return { ok: false, error: 'email_mismatch' };
 
   const name = clean(b.name, 40);
-  const username = clean(b.username, 20);
+  if (!name) return { ok: false, error: 'bad_name' };
+
+  let username = clean(b.username, 20);
+  if (!username) username = 'rider_' + phone.slice(-6);
+
   const vehicle = normVehicle(b.vehicle);
   const vehicleType = VEHICLE_TYPES.indexOf(b.vehicleType) !== -1 ? b.vehicleType : 'car';
 
-  if (!name) return { ok: false, error: 'bad_name' };
-  if (!/^[a-zA-Z0-9_.]{3,20}$/.test(username)) return { ok: false, error: 'bad_username' };
-  if (!isVehicle(vehicle)) return { ok: false, error: 'bad_vehicle' };
+  // Optional password
+  let passHash = '', salt = '';
+  if (b.password) {
+    const pw = String(b.password);
+    if (pw.length < PW_MIN || pw.length > PW_MAX) {
+      return { ok: false, error: 'weak_password' };
+    }
+    salt = newSalt();
+    passHash = hashPassword(pw, salt);
+  }
 
+  // Uniqueness checks
   const users = readAll('users');
   for (let i = 0; i < users.length; i++) {
     if (users[i].phone === phone) return { ok: false, error: 'phone_exists' };
-    if (users[i].username.toLowerCase() === username.toLowerCase()) {
+    if (users[i].username && users[i].username.toLowerCase() === username.toLowerCase()) {
       return { ok: false, error: 'username_taken' };
     }
-    if (users[i].vehicle === vehicle) return { ok: false, error: 'vehicle_taken' };
+    if (users[i].email && users[i].email.toLowerCase() === email) {
+      return { ok: false, error: 'email_taken' };
+    }
   }
 
   const t = now();
@@ -731,10 +839,13 @@ H.register = function (b) {
     community: clean(b.community, 40),
     role: 'user',
     status: 'active',
+    agentStatus: '',
     laneCount: 0,
     tripCount: 0,
     ratingSum: 0,
     ratingCount: 0,
+    passHash: passHash,
+    salt: salt,
     createdAt: t,
     lastLogin: t,
     device: clean(b.device, 100)
@@ -744,7 +855,6 @@ H.register = function (b) {
 
   const token = createSession(phone, b.device);
 
-  // Send welcome email with all the user details
   try {
     sendWelcomeEmail(email, name, vehicle, b.community, phone, email);
   } catch (e) {
@@ -755,22 +865,73 @@ H.register = function (b) {
   return { ok: true, token: token, user: publicSelf(findUser(phone)) };
 };
 
+/**
+ * LOGIN — accepts identity (phone OR email) + password OR OTP.
+ * Frontend sends { phone: identity, password } or { phone: identity, code }.
+ */
 H.login = function (b) {
-  const phone = String(b.phone || '');
-  if (!isPhone(phone)) throw new ApiError('bad_phone');
+  const identity = String(b.phone || '').trim();
+  if (!identity) throw new ApiError('bad_identity');
 
-  const user = findUser(phone);
-  if (!user) return { ok: false, error: 'not_registered' };
+  const isEmailLogin = identity.indexOf('@') > -1;
+  let user = null;
 
-  const otp = takeVerifiedOtp(phone, 'login');
-  if (!otp) return { ok: false, error: 'not_verified' };
+  if (isEmailLogin) {
+    if (!isEmail(identity)) throw new ApiError('bad_email');
+    user = findUserByEmail(identity);
+    if (!user) return { ok: false, error: 'not_registered' };
+  } else {
+    if (!isPhone(identity)) throw new ApiError('bad_phone');
+    user = findUser(identity);
+    if (!user) return { ok: false, error: 'not_registered' };
+  }
 
-  updateRow('otps', otp._row, { consumed: '1' });
+  const phone = user.phone;
+
+  // Path A: password login
+  if (b.password) {
+    if (!user.passHash) {
+      return { ok: false, error: 'no_password' };
+    }
+    const hash = hashPassword(String(b.password), user.salt);
+    if (hash !== user.passHash) {
+      try { rateLimit(['pw:' + phone], 8, 900); } catch (e) {
+        throw new ApiError('too_many_attempts', 'Too many attempts. Try again in 15 minutes.');
+      }
+      return { ok: false, error: 'bad_credentials' };
+    }
+  }
+  // Path B: OTP login
+  else if (b.code) {
+    const otp = takeVerifiedOtp(phone, 'login');
+    if (!otp) return { ok: false, error: 'not_verified' };
+    updateRow('otps', otp._row, { consumed: '1' });
+  }
+  // No credentials
+  else {
+    return { ok: false, error: 'no_credentials' };
+  }
+
   try { updateRow('users', user._row, { lastLogin: now() }); } catch (e) {}
 
   const token = createSession(phone, b.device);
-  logAudit(phone, 'login', '');
-  return { ok: true, token: token, user: publicSelf(user) };
+  logAudit(phone, 'login', isEmailLogin ? 'email' : 'phone');
+  return { ok: true, token: token, user: publicSelf(findUser(phone)) };
+};
+
+H.setPassword = function (b, u) {
+  const pw = String(b.password || '');
+  if (pw.length < PW_MIN || pw.length > PW_MAX) {
+    return { ok: false, error: 'weak_password' };
+  }
+  if (u.passHash && b.oldPassword) {
+    const oldHash = hashPassword(String(b.oldPassword), u.salt);
+    if (oldHash !== u.passHash) return { ok: false, error: 'bad_credentials' };
+  }
+  const salt = newSalt();
+  const hash = hashPassword(pw, salt);
+  updateRow('users', u._row, { passHash: hash, salt: salt });
+  return { ok: true };
 };
 
 H.logout = function (b, u) {
@@ -781,47 +942,205 @@ H.logout = function (b, u) {
   return { ok: true };
 };
 
-H.checkSession = function (b, u) { return { valid: !!u }; };
+H.checkSession = function (b, u) {
+  if (!u) return { valid: false };
+  return { valid: true, user: publicSelf(u) };
+};
+
 H.getMe = function (b, u) { return { ok: true, user: publicSelf(u) }; };
 
 H.updateMe = function (b, u) {
   const patch = {};
+  const r = b.patch || b;
 
-  if (b.name !== undefined) {
-    const n = clean(b.name, 40);
+  if (r.name !== undefined) {
+    const n = clean(r.name, 40);
     if (!n) return { ok: false, error: 'bad_name' };
     patch.name = n;
   }
 
-  if (b.vehicle !== undefined) {
-    const v = normVehicle(b.vehicle);
-    if (!isVehicle(v)) return { ok: false, error: 'bad_vehicle' };
-    const users = readAll('users');
-    for (let i = 0; i < users.length; i++) {
-      if (users[i].vehicle === v && users[i].phone !== u.phone) {
-        return { ok: false, error: 'vehicle_taken' };
+  if (r.vehicle !== undefined) {
+    const v = normVehicle(r.vehicle);
+    if (v && !isVehicle(v)) return { ok: false, error: 'bad_vehicle' };
+    if (v) {
+      const users = readAll('users');
+      for (let i = 0; i < users.length; i++) {
+        if (users[i].vehicle === v && users[i].phone !== u.phone) {
+          return { ok: false, error: 'vehicle_taken' };
+        }
       }
     }
     patch.vehicle = v;
   }
 
-  if (b.vehicleType !== undefined && VEHICLE_TYPES.indexOf(b.vehicleType) !== -1) {
-    patch.vehicleType = b.vehicleType;
+  if (r.vehicleType !== undefined && VEHICLE_TYPES.indexOf(r.vehicleType) !== -1) {
+    patch.vehicleType = r.vehicleType;
   }
+
+  if (r.upiId !== undefined) patch.upiQrId = clean(r.upiId, 100);
+  if (r.city !== undefined) patch.community = clean(r.city, 60);
+  if (r.bio !== undefined) patch.username = clean(r.bio, 30); // reuse for bio
 
   const tag = ownerTag(u.phone);
   const slots = ['avatarId', 'vehiclePhotoId', 'platePhotoId', 'upiQrId'];
   for (let i = 0; i < slots.length; i++) {
     const k = slots[i];
-    if (b[k] === undefined) continue;
-    const id = String(b[k] || '');
+    if (r[k] === undefined) continue;
+    const id = String(r[k] || '');
     if (id === '') { patch[k] = ''; continue; }
     if (!isId(id) || !fileOwnedBy(id, tag)) continue;
     patch[k] = id;
   }
 
-  updateRow('users', u._row, patch);
+  if (Object.keys(patch).length) {
+    updateRow('users', u._row, patch);
+  }
   return { ok: true, user: publicSelf(findUser(u.phone)) };
+};
+
+// ─── SteerAgent flow ───
+H.becomeAgent = function (b, u) {
+  if (u.role === 'agent' && u.agentStatus === 'active') {
+    return { ok: true, user: publicSelf(u), already: true };
+  }
+
+  rateLimit(['agent:' + u.phone], 3, 3600);
+
+  const vehicle = normVehicle(b.vehicle || b.plate || u.vehicle);
+  if (!isVehicle(vehicle)) throw new ApiError('bad_vehicle', 'Invalid vehicle number');
+
+  const vehicleType = VEHICLE_TYPES.indexOf(b.vehicleType) !== -1 ? b.vehicleType : (u.vehicleType || 'car');
+  const upiId = clean(b.upiId, 100);
+
+  // Verify photo ownership
+  const tag = ownerTag(u.phone);
+  const vehiclePhotoId = String(b.vehiclePhotoId || b.vehiclePhoto || '');
+  const platePhotoId = String(b.platePhotoId || '');
+  const selfieId = String(b.selfieId || b.selfie || '');
+  const licenseId = String(b.licenseId || b.license || '');
+  const rcId = String(b.rcId || b.rc || '');
+
+  if (vehiclePhotoId && (!isId(vehiclePhotoId) || !fileOwnedBy(vehiclePhotoId, tag))) {
+    throw new ApiError('bad_photo', 'Vehicle photo not yours');
+  }
+  if (selfieId && (!isId(selfieId) || !fileOwnedBy(selfieId, tag))) {
+    throw new ApiError('bad_photo', 'Selfie not yours');
+  }
+
+  // Check for existing pending application
+  const apps = readAll('applications');
+  for (let i = 0; i < apps.length; i++) {
+    if (apps[i].phone === u.phone && apps[i].status === 'pending') {
+      return { ok: true, pending: true, user: publicSelf(u) };
+    }
+  }
+
+  const appliedAt = now();
+  appendRow('applications', {
+    id: shortId('app'),
+    phone: u.phone,
+    name: u.name,
+    vehicle: vehicle,
+    vehicleType: vehicleType,
+    vehiclePhotoId: vehiclePhotoId,
+    platePhotoId: platePhotoId,
+    selfieId: selfieId,
+    upiId: upiId,
+    agreement: 'accepted',
+    status: 'pending',
+    notes: '',
+    appliedAt: appliedAt,
+    reviewedAt: '',
+    reviewedBy: ''
+  });
+
+  // Update user to pending status
+  updateRow('users', u._row, {
+    vehicle: vehicle,
+    vehicleType: vehicleType,
+    vehiclePhotoId: vehiclePhotoId,
+    platePhotoId: platePhotoId,
+    agentStatus: 'pending',
+    upiQrId: upiId
+  });
+
+  logAudit(u.phone, 'becomeAgent', vehicle);
+  return { ok: true, pending: true, user: publicSelf(findUser(u.phone)) };
+};
+
+// ─── Admin ───
+H.adminPendingAgents = function (b, u) {
+  const apps = readAll('applications').filter(function (a) { return a.status === 'pending'; });
+  return apps.map(function (a) {
+    return {
+      uid: a.phone,
+      phone: a.phone,
+      name: a.name,
+      vehicle: a.vehicle,
+      vehicleType: a.vehicleType,
+      vehiclePhotoId: a.vehiclePhotoId,
+      platePhotoId: a.platePhotoId,
+      selfieId: a.selfieId,
+      upiId: a.upiId,
+      city: '',
+      appliedAt: Number(a.appliedAt)
+    };
+  });
+};
+
+H.adminApproveAgent = function (b, u) {
+  const targetPhone = String(b.uid || b.phone || '');
+  const approve = b.approve !== false && b.approve !== 'false';
+
+  const target = findUser(targetPhone);
+  if (!target) throw new ApiError('not_found', 'User not found');
+
+  const apps = readAll('applications');
+  let appRow = null;
+  for (let i = 0; i < apps.length; i++) {
+    if (apps[i].phone === targetPhone && apps[i].status === 'pending') {
+      appRow = apps[i];
+      break;
+    }
+  }
+
+  const reviewedAt = now();
+  if (approve) {
+    updateRow('users', target._row, {
+      role: 'agent',
+      agentStatus: 'active'
+    });
+    if (appRow) {
+      updateRow('applications', appRow._row, {
+        status: 'approved',
+        reviewedAt: reviewedAt,
+        reviewedBy: u.phone
+      });
+    }
+    try { sendAgentApprovedEmail(target.email, target.name); } catch (e) {}
+  } else {
+    updateRow('users', target._row, {
+      role: 'user',
+      agentStatus: 'rejected'
+    });
+    if (appRow) {
+      updateRow('applications', appRow._row, {
+        status: 'rejected',
+        notes: clean(b.reason, 500),
+        reviewedAt: reviewedAt,
+        reviewedBy: u.phone
+      });
+    }
+    try { sendAgentRejectedEmail(target.email, target.name, b.reason || 'Documents were not valid.'); } catch (e) {}
+  }
+
+  logAudit(u.phone, approve ? 'approveAgent' : 'rejectAgent', targetPhone);
+  return { ok: true };
+};
+
+// Legacy alias (frontend uses adminApproveAgent with uid+approve)
+H.adminRejectAgent = function (b, u) {
+  return H.adminApproveAgent({ uid: b.uid || b.phone, approve: false, reason: b.reason }, u);
 };
 
 // ─── Lanes ───
@@ -830,18 +1149,23 @@ function publicLane(l, me) {
   return {
     id: l.id,
     driver: l.driver,
+    ownerName: l.driver,
     vehicle: l.vehicle,
     vehicleType: l.vehicleType,
     from: l.from,
     via: l.via,
     to: l.to,
+    title: (l.from ? l.from + ' → ' : '') + l.to,
+    description: l.via || '',
     total: Number(l.total),
+    seats: Number(l.total) - Number(l.taken),
     taken: Number(l.taken),
     fare: Number(l.fare),
     lat: own ? round(l.lat, 7) : round(l.lat, 3),
     lng: own ? round(l.lng, 7) : round(l.lng, 3),
     status: l.status,
     ts: Number(l.ts),
+    createdAt: new Date(Number(l.ts)).toISOString(),
     peerId: l.peerId,
     lastSeen: Number(l.lastSeen),
     showPlate: l.showPlate || 'true',
@@ -855,9 +1179,9 @@ function laneFields(row, user, existing) {
   return {
     driver: user.name,
     vehicle: user.vehicle,
-    vehicleType: VEHICLE_TYPES.indexOf(row.vehicleType) !== -1 ? row.vehicleType : user.vehicleType,
-    from: clean(row.from, 80),
-    via: clean(row.via, 200),
+    vehicleType: VEHICLE_TYPES.indexOf(row.vehicleType) !== -1 ? row.vehicleType : (user.vehicleType || 'car'),
+    from: clean(row.from || row.title, 80),
+    via: clean(row.via || row.description, 200),
     to: clean(row.to, 80),
     total: total,
     taken: taken,
@@ -883,15 +1207,11 @@ H.listLanes = function (b, u) {
 };
 
 H.insertLane = function (b, u) {
-  const row = b.row || {};
-  if (!isId(row.id)) throw new ApiError('bad_id');
-  if (!clean(row.to, 80)) throw new ApiError('bad_destination');
+  const row = b.row || b;
+  if (!isId(row.id)) row.id = shortId('L');
 
   rateLimit(['lane:' + u.phone], 20, 3600);
   const lanes = readAll('lanes');
-  for (let i = 0; i < lanes.length; i++) {
-    if (lanes[i].id === row.id) throw new ApiError('exists');
-  }
   const mine = lanes.filter(function (l) {
     return l.ownerPhone === u.phone && now() - Number(l.ts) < LANE_TTL_MS;
   });
@@ -903,7 +1223,7 @@ H.insertLane = function (b, u) {
   appendRow('lanes', obj);
 
   logAudit(u.phone, 'insertLane', f.to);
-  return { ok: true, id: row.id };
+  return publicLane(Object.assign({ id: row.id, ownerPhone: u.phone }, f), u);
 };
 
 function ownLane(id, u) {
@@ -920,7 +1240,8 @@ function ownLane(id, u) {
 H.updateLane = function (b, u) {
   const l = ownLane(b.id, u);
   if (!l) throw new ApiError('not_found');
-  updateRow('lanes', l._row, laneFields(b.row || {}, u, l));
+  const patch = laneFields(b.row || b, u, l);
+  updateRow('lanes', l._row, patch);
   return { ok: true };
 };
 
@@ -935,13 +1256,17 @@ function publicPost(p, me) {
   return {
     id: p.id,
     name: p.name,
+    ownerName: p.name,
     avatar: p.avatar,
     title: p.title,
     text: p.text,
+    mediaUrl: p.tags && p.tags.indexOf('http') === 0 ? p.tags : '',
+    mediaType: '',
     tags: p.tags,
     time: p.time,
     likes: Number(p.likes),
     ts: Number(p.ts),
+    createdAt: new Date(Number(p.ts)).toISOString(),
     vehicle: p.vehicle,
     own: !!me && p.ownerPhone === me.phone
   };
@@ -954,24 +1279,26 @@ H.listHive = function (b, u) {
 };
 
 H.insertHive = function (b, u) {
-  const r = b.row || {};
-  if (!isId(r.id)) throw new ApiError('bad_id');
+  const r = b.row || b;
+  if (!isId(r.id)) r.id = shortId('H');
 
   const title = clean(r.title, 80);
   const text = clean(String(r.text || '').replace(/\r/g, ''), 2000).trim() || title;
-  if (!text) throw new ApiError('empty');
+  if (!text) throw new ApiError('empty', 'Post cannot be empty');
 
   rateLimit(['hive:' + u.phone], 30, 3600);
-  const existing = readAll('hive').filter(function (p) { return p.id === r.id; });
-  if (existing.length) throw new ApiError('exists');
 
-  const tags = String(r.tags || '')
+  // Save media URL in tags if present
+  let tags = String(r.tags || '')
     .split('|')
     .map(function (t) { return clean(t, 24); })
     .filter(Boolean)
     .slice(0, 5)
     .join('|');
 
+  if (r.mediaUrl && !tags) tags = clean(r.mediaUrl, 500);
+
+  const ts = now();
   appendRow('hive', {
     id: r.id,
     ownerPhone: u.phone,
@@ -982,7 +1309,7 @@ H.insertHive = function (b, u) {
     tags: tags,
     time: 'just now',
     likes: 0,
-    ts: now(),
+    ts: ts,
     vehicle: u.vehicle
   });
 
@@ -1003,7 +1330,7 @@ function ownPost(id, u) {
 
 H.updateHive = function (b, u) {
   const p = ownPost(b.id, u);
-  const r = b.row || {};
+  const r = b.row || b;
   const patch = {};
   if (r.title !== undefined) patch.title = clean(r.title, 80);
   if (r.text !== undefined) patch.text = clean(r.text, 2000);
@@ -1066,14 +1393,20 @@ function checkRoom(roomId, u) {
     }
     return { id: id, type: 'dm' };
   }
+  if (/^local_[-0-9._a-z]{3,40}$/.test(id)) {
+    return { id: id, type: 'local' };
+  }
   if (/^local-[0-9a-z]{4,8}$/.test(id)) {
     return { id: id, type: 'local' };
+  }
+  if (/^[A-Za-z0-9_\-:.]{1,60}$/.test(id)) {
+    return { id: id, type: 'room' };
   }
   throw new ApiError('bad_room');
 }
 
 H.sendMessage = function (b, u) {
-  const r = b.row || {};
+  const r = b.row || b;
   const room = checkRoom(r.roomId, u);
   const text = clean(r.text, 1000);
   if (!text) throw new ApiError('empty');
@@ -1112,14 +1445,15 @@ H.getMessages = function (b, u) {
       sender: m.sender,
       text: m.text,
       seq: m.seq === '' ? null : Number(m.seq),
-      ts: Number(m.ts)
+      ts: Number(m.ts),
+      mine: m.fromPhone === u.phone
     };
   });
 };
 
 // ─── Presence ───
 H.updatePresence = function (b, u) {
-  const r = b.row || {};
+  const r = b.row || b;
   rateLimit(['pres:' + u.phone], 12, 60);
 
   const obj = {
@@ -1128,7 +1462,7 @@ H.updatePresence = function (b, u) {
     name: u.name,
     avatar: initials(u.name),
     peerId: /^steeradar-veh-[A-Z0-9-]{4,24}$/.test(String(r.peerId || '')) ? r.peerId : '',
-    vehicleType: VEHICLE_TYPES.indexOf(r.vehicleType) !== -1 ? r.vehicleType : u.vehicleType,
+    vehicleType: VEHICLE_TYPES.indexOf(r.vehicleType) !== -1 ? r.vehicleType : (u.vehicleType || 'car'),
     lat: round(coord(r.lat, 90), 5),
     lng: round(coord(r.lng, 180), 5),
     lastSeen: now()
@@ -1152,13 +1486,18 @@ H.activeVehicles = function (b, u) {
   return list.slice(0, 200).map(function (p) {
     return {
       vehicle: p.vehicle,
+      phone: p.phone,
+      owner: p.phone,
       name: p.name,
+      ownerName: p.name,
       avatar: p.avatar,
       peerId: p.peerId,
       vehicleType: p.vehicleType,
       lat: p.lat === '' ? '' : Number(p.lat),
       lng: p.lng === '' ? '' : Number(p.lng),
-      lastSeen: Number(p.lastSeen)
+      lastSeen: Number(p.lastSeen),
+      updatedAt: new Date(Number(p.lastSeen)).toISOString(),
+      mine: u && p.phone === u.phone
     };
   });
 };
@@ -1174,20 +1513,30 @@ H.removePresence = function (b, u) {
 // ─── Trips ───
 H.startTrip = function (b, u) {
   rateLimit(['trip:' + u.phone], 30, 3600);
+  const d = b.data || b;
+
+  // Prevent duplicate active trips
+  const active = readAll('trips').filter(function (t) {
+    return t.phone === u.phone && t.status === 'active';
+  });
+  for (let i = 0; i < active.length; i++) {
+    try { updateRow('trips', active[i]._row, { status: 'abandoned', endTs: now() }); } catch (e) {}
+  }
+
   const id = shortId('t');
   appendRow('trips', {
     id: id,
     phone: u.phone,
-    laneId: isId(b.laneId) ? b.laneId : '',
-    driverPhone: isPhone(b.driverPhone) ? b.driverPhone : '',
+    laneId: isId(d.laneId) ? d.laneId : '',
+    driverPhone: isPhone(d.driverPhone) ? d.driverPhone : '',
     startTs: now(),
     endTs: '',
     distance: '',
     fare: '',
     status: 'active',
-    notes: ''
+    notes: clean(d.startLat, 20) + ',' + clean(d.startLng, 20)
   });
-  return { ok: true, id: id };
+  return { id: id, ok: true };
 };
 
 H.endTrip = function (b, u) {
@@ -1202,7 +1551,7 @@ H.endTrip = function (b, u) {
   if (!trip) throw new ApiError('not_found');
 
   const fare = toNum(b.fare, 0, 100000, 0);
-  const distance = toNum(b.distance, 0, 5000000, 0);
+  const distance = toNum(b.distanceKm, 0, 5000000, 0);
 
   updateRow('trips', trip._row, {
     endTs: now(),
@@ -1212,8 +1561,8 @@ H.endTrip = function (b, u) {
     notes: clean(b.notes, 500)
   });
 
-  const driver = isPhone(b.driverPhone) ? findUser(b.driverPhone) : null;
-  if (driver) {
+  const driver = isPhone(trip.driverPhone) ? findUser(trip.driverPhone) : null;
+  if (driver && u.email) {
     const rateUrl = APP_URL + '?rate=' + trip.id;
     try { sendRateRequestEmail(u.email, driver.name, rateUrl); } catch (e) {}
   }
@@ -1224,7 +1573,17 @@ H.endTrip = function (b, u) {
 H.myTrips = function (b, u) {
   const trips = readAll('trips').filter(function (t) { return t.phone === u.phone; });
   trips.sort(function (a, c) { return Number(c.startTs) - Number(a.startTs); });
-  return trips.slice(0, 100);
+  return trips.slice(0, 100).map(function (t) {
+    return {
+      id: t.id,
+      status: t.status,
+      startedAt: t.startTs ? new Date(Number(t.startTs)).toISOString() : '',
+      endedAt: t.endTs ? new Date(Number(t.endTs)).toISOString() : '',
+      distanceKm: t.distance || '',
+      fare: t.fare || '',
+      createdAt: t.startTs ? new Date(Number(t.startTs)).toISOString() : ''
+    };
+  });
 };
 
 // ─── Ratings ───
@@ -1295,6 +1654,83 @@ H.reportUser = function (b, u) {
   return { ok: true };
 };
 
+// ─── Points (Saved map locations) ───
+H.savePoint = function (b, u) {
+  const r = b.row || b;
+  const lat = coord(r.lat, 90);
+  const lng = coord(r.lng, 180);
+  if (lat === '' || lng === '') throw new ApiError('bad_location', 'Invalid coordinates');
+
+  const mine = readAll('points').filter(function (p) { return p.ownerPhone === u.phone; }).length;
+  if (mine >= MAX_POINTS_PER_USER) throw new ApiError('limit_reached', 'Max saved points reached');
+
+  const id = shortId('P');
+  const ts = now();
+  appendRow('points', {
+    id: id,
+    ownerPhone: u.phone,
+    ownerName: u.name,
+    label: clean(r.label || r.name, 80) || 'Saved point',
+    note: clean(r.note, 200),
+    category: clean(r.category, 30),
+    lat: lat,
+    lng: lng,
+    shared: r.shared === true || r.shared === 'true' ? 'true' : 'false',
+    createdAt: ts,
+    updatedAt: ts
+  });
+
+  return { id: id, ok: true };
+};
+
+H.myPoints = function (b, u) {
+  const points = readAll('points').filter(function (p) { return p.ownerPhone === u.phone; });
+  points.sort(function (a, c) { return Number(c.createdAt) - Number(a.createdAt); });
+  return points.map(function (p) {
+    return {
+      id: p.id,
+      label: p.label,
+      note: p.note,
+      category: p.category,
+      lat: Number(p.lat),
+      lng: Number(p.lng),
+      shared: p.shared === 'true',
+      mine: true
+    };
+  });
+};
+
+H.listPoints = function (b, u) {
+  const points = readAll('points').filter(function (p) { return p.shared === 'true'; });
+  points.sort(function (a, c) { return Number(c.createdAt) - Number(a.createdAt); });
+  return points.slice(0, 500).map(function (p) {
+    return {
+      id: p.id,
+      label: p.label,
+      note: p.note,
+      category: p.category,
+      lat: Number(p.lat),
+      lng: Number(p.lng),
+      ownerName: p.ownerName,
+      shared: true,
+      mine: !!u && p.ownerPhone === u.phone
+    };
+  });
+};
+
+H.deletePoint = function (b, u) {
+  const id = String(b.id || '');
+  const points = readAll('points');
+  for (let i = 0; i < points.length; i++) {
+    if (points[i].id === id) {
+      if (points[i].ownerPhone !== u.phone) throw new ApiError('forbidden', 'Not your point');
+      deleteRow('points', points[i]._row);
+      return { ok: true };
+    }
+  }
+  return { ok: true };
+};
+
 // ─── Images ───
 function ownerTag(phone) {
   return 'owner:' + sha256Hex(phone + ':' + pepper()).slice(0, 24);
@@ -1314,22 +1750,29 @@ H.uploadImage = function (b, u) {
   rateLimit(['img:' + u.phone], 12, 21600);
 
   const data = String(b.base64 || '');
-  const m = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(data);
-  if (!m) throw new ApiError('bad_image', 'JPEG only');
-  if (data.length > 900000) throw new ApiError('too_large');
+  const m = /^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/=]+)$/.exec(data);
+  if (!m) throw new ApiError('bad_image', 'Unsupported image type');
+  if (data.length > 4000000) throw new ApiError('too_large', 'Image too large');
 
-  const slot = String(b.folder || '').split('/').pop();
-  if (PHOTO_SLOTS.indexOf(slot) === -1) throw new ApiError('bad_slot');
+  const mime = 'image/' + m[1];
+  const slot = String(b.folder || 'misc').split('/').pop();
+  if (PHOTO_SLOTS.indexOf(slot) === -1) {
+    // Allow but default to misc
+  }
 
-  const bytes = Utilities.base64Decode(m[1]);
-  const blob = Utilities.newBlob(bytes, 'image/jpeg', slot + '_' + now() + '.jpg');
+  const bytes = Utilities.base64Decode(m[2]);
+  const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+  const blob = Utilities.newBlob(bytes, mime, slot + '_' + now() + '.' + ext);
 
   const root = getFolder('Steeradar Uploads', DriveApp.getRootFolder());
   const mine = getFolder(sha256Hex(u.phone + pepper()).slice(0, 16), root);
   const file = mine.createFile(blob);
   file.setDescription(ownerTag(u.phone));
+  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
 
-  return { fileId: file.getId(), url: '' };
+  const fileId = file.getId();
+  const url = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w1200';
+  return { fileId: fileId, url: url, viewUrl: 'https://drive.google.com/uc?export=view&id=' + fileId };
 };
 
 H.deleteImage = function (b, u) {
@@ -1345,37 +1788,56 @@ H.deleteImage = function (b, u) {
 //  ROUTER
 // ═══════════════════════════════════════════════════
 const ROUTES = {
-  ping:            { auth: 'none' },
-  sendOtp:         { auth: 'none', write: true },
-  verifyOtp:       { auth: 'none', write: true },
-  register:        { auth: 'none', write: true },
-  login:           { auth: 'none', write: true },
-  checkSession:    { auth: 'optional' },
-  listLanes:       { auth: 'optional' },
-  listHive:        { auth: 'optional' },
-  logout:          { auth: 'required', write: true },
-  getMe:           { auth: 'required' },
-  updateMe:        { auth: 'required', write: true },
-  insertLane:      { auth: 'required', write: true },
-  updateLane:      { auth: 'required', write: true },
-  removeLane:      { auth: 'required', write: true },
-  insertHive:      { auth: 'required', write: true },
-  updateHive:      { auth: 'required', write: true },
-  deleteHive:      { auth: 'required', write: true },
-  like:            { auth: 'required', write: true },
-  getMessages:     { auth: 'required' },
-  sendMessage:     { auth: 'required', write: true },
-  updatePresence:  { auth: 'required', write: true },
-  activeVehicles:  { auth: 'required' },
-  removePresence:  { auth: 'required', write: true },
-  startTrip:       { auth: 'required', write: true },
-  endTrip:         { auth: 'required', write: true },
-  myTrips:         { auth: 'required' },
-  rateTrip:        { auth: 'required', write: true },
-  reportUser:      { auth: 'required', write: true },
-  uploadImage:     { auth: 'required', write: true },
-  deleteImage:     { auth: 'required', write: true },
-  debug:           { auth: 'required' }
+  ping:               { auth: 'none' },
+  sendOtp:            { auth: 'none', write: true },
+  verifyOtp:          { auth: 'none', write: true },
+  register:           { auth: 'none', write: true },
+  login:              { auth: 'none', write: true },
+  checkSession:       { auth: 'optional' },
+  listLanes:          { auth: 'optional' },
+  listHive:           { auth: 'optional' },
+
+  logout:             { auth: 'required', write: true },
+  getMe:              { auth: 'required' },
+  updateMe:           { auth: 'required', write: true },
+  setPassword:        { auth: 'required', write: true },
+  becomeAgent:        { auth: 'required', write: true },
+
+  insertLane:         { auth: 'required', write: true },
+  updateLane:         { auth: 'required', write: true },
+  removeLane:         { auth: 'required', write: true },
+
+  insertHive:         { auth: 'required', write: true },
+  updateHive:         { auth: 'required', write: true },
+  deleteHive:         { auth: 'required', write: true },
+  like:               { auth: 'required', write: true },
+
+  getMessages:        { auth: 'required' },
+  sendMessage:        { auth: 'required', write: true },
+
+  updatePresence:     { auth: 'required', write: true },
+  activeVehicles:     { auth: 'optional' },
+  removePresence:     { auth: 'required', write: true },
+
+  startTrip:          { auth: 'required', write: true },
+  endTrip:            { auth: 'required', write: true },
+  myTrips:            { auth: 'required' },
+  rateTrip:           { auth: 'required', write: true },
+  reportUser:         { auth: 'required', write: true },
+
+  savePoint:          { auth: 'required', write: true },
+  myPoints:           { auth: 'required' },
+  listPoints:         { auth: 'optional' },
+  deletePoint:        { auth: 'required', write: true },
+
+  uploadImage:        { auth: 'required', write: true },
+  deleteImage:        { auth: 'required', write: true },
+
+  adminPendingAgents: { auth: 'required' },
+  adminApproveAgent:  { auth: 'required', write: true },
+  adminRejectAgent:   { auth: 'required', write: true },
+
+  debug:              { auth: 'required' }
 };
 
 function out(obj) {
@@ -1400,7 +1862,7 @@ function doPost(e) {
 
     const action = String(body.action || '');
     if (!Object.prototype.hasOwnProperty.call(ROUTES, action)) {
-      throw new ApiError('unknown_action');
+      throw new ApiError('unknown_action', 'Unknown action: ' + action);
     }
     const route = ROUTES[action];
 
@@ -1408,6 +1870,12 @@ function doPost(e) {
       let user = null;
       if (route.auth === 'required') user = requireUser(body);
       else if (route.auth === 'optional') user = userByToken(body);
+
+      // Admin guard for admin actions
+      if (action.indexOf('admin') === 0) {
+        if (!isAdmin_(user)) throw new ApiError('forbidden', 'Admin access required');
+      }
+
       return H[action](body, user);
     };
 
@@ -1422,7 +1890,7 @@ function doPost(e) {
       });
     }
     Logger.log('steeradar error: ' + (err && err.stack ? err.stack : err));
-    return out({ error: 'server_error' });
+    return out({ error: 'server_error', message: 'Something went wrong' });
   }
 }
 
@@ -1437,6 +1905,7 @@ function setup() {
   Logger.log('============================================');
   Logger.log('Sheet URL: ' + getSS().getUrl());
   Logger.log('Mail quota: ' + safeQuota());
+  Logger.log('Set ADMIN_PHONES in Script Properties');
   Logger.log('Now: Deploy → New version → Anyone');
 }
 
@@ -1492,10 +1961,10 @@ function testWelcome() {
   Logger.log('Welcome email: ' + (ok ? 'OK' : 'FAILED'));
 }
 
-function testReceipt() {
+function testAgentApproved() {
   const to = Session.getActiveUser().getEmail();
-  const ok = sendReceiptEmail(to, 'Test Driver', 'Koramangala', 'Whitefield', '12.4 km', 45, '28 min');
-  Logger.log('Receipt email: ' + (ok ? 'OK' : 'FAILED'));
+  const ok = sendAgentApprovedEmail(to, 'Test Rider');
+  Logger.log('Agent approved email: ' + (ok ? 'OK' : 'FAILED'));
 }
 
 function checkMailQuota() {
