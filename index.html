@@ -32,7 +32,8 @@
 
         <!-- HEADER -->
         <header id="main-header">
-            <div class="logo-text" onclick="switchTab('lanes')">
+            <!-- Logo — long press (800ms) opens log viewer -->
+            <div class="logo-text" id="logo-trigger" title="Long-press for logs">
                 <img 
                     src="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steeradar-logo.png" 
                     alt="SteerRadar" 
@@ -55,7 +56,7 @@
 
         <!-- MAIN VIEWS -->
         <main>
-            <!-- 1. LANES VIEW -->
+            <!-- 1. LANES VIEW (Live Drivers) -->
             <section id="view-lanes" class="view-section active">
                 <div class="section-header flex justify-between align-center">
                     <div>
@@ -68,7 +69,7 @@
                 </div>
             </section>
 
-            <!-- 2. HIVE VIEW -->
+            <!-- 2. HIVE VIEW (Community Feed) -->
             <section id="view-hive" class="view-section">
                 <div class="hive-header">
                     <h2 class="hive-title">Hive</h2>
@@ -188,6 +189,11 @@
 
                 <button class="btn btn-secondary w-full mt-3" onclick="openModal('trips-modal')">
                     <i class="fas fa-route"></i> My Trips
+                </button>
+
+                <!-- Debug: manual log access -->
+                <button class="btn btn-secondary w-full mt-3" onclick="openModal('log-modal')">
+                    <i class="fas fa-bug"></i> View Debug Log
                 </button>
 
                 <button class="btn btn-secondary w-full mt-4" onclick="handleLogout()">Log Out</button>
@@ -311,6 +317,7 @@
                         <option value="two-wheeler">Bike</option>
                         <option value="car">Car</option>
                         <option value="auto">Auto</option>
+                        <option value="bus">Bus</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -493,6 +500,31 @@
                 <input type="text" id="location-name" class="form-input" placeholder="e.g., Good Parking Spot">
             </div>
             <button class="btn btn-primary w-full" onclick="confirmSaveLocation()">Save to My Profile</button>
+        </div>
+    </div>
+
+    <!-- 11. LOG VIEWER MODAL (Debug) -->
+    <div id="log-modal" class="modal-overlay hidden">
+        <div class="modal-content log-modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-bug"></i> Debug Log</h2>
+                <button onclick="closeModal('log-modal')" class="close-btn">&times;</button>
+            </div>
+            <p class="text-sub text-xs mb-2" style="line-height:1.5;">
+                Captures console output, errors, and failed network requests.
+                Long-press the logo anytime to open this.
+            </p>
+            <div id="logContent" class="log-content">
+                <div class="log-empty">No logs yet.</div>
+            </div>
+            <div class="log-actions">
+                <button class="btn btn-secondary btn-sm" onclick="logger.export()">
+                    <i class="fas fa-copy"></i> Copy
+                </button>
+                <button class="btn btn-danger btn-sm" onclick="logger.clear()">
+                    <i class="fas fa-trash"></i> Clear
+                </button>
+            </div>
         </div>
     </div>
 
