@@ -2,7 +2,13 @@
  * ============================================================================
  * STEERADAR FRONTEND CONTROLLER (v11.0)
  * ============================================================================
- * Compressed + sequential image uploads with descriptive filenames.
+ * Features:
+ *  - Auth (OTP + password, email or phone login)
+ *  - Lanes, Hive, Chat, Neighborhood Chat
+ *  - Trips, Live presence, Ghost mode
+ *  - Map: search, recenter, live location, agent markers with DM
+ *  - Compressed + sequential + named image uploads
+ *  - Admin panel, Logger, Long-press debug
  * ============================================================================
  */
 
@@ -182,8 +188,14 @@ function setupNetworkHandlers() {
 
 function setupVisibilityHandlers() {
     document.addEventListener('visibilitychange', () => {
-        if (document.hidden) stopPolling();
-        else { startAutoRefresh(); refreshAll(); }
+        if (document.hidden) {
+            stopPolling();
+            mapModule.stopLiveLocation?.();
+        } else {
+            startAutoRefresh();
+            refreshAll();
+            mapModule.startLiveLocation?.();
+        }
     });
 }
 
@@ -331,6 +343,7 @@ window.verifyOTP = async () => {
 window.handleLogout = async () => {
     if (!confirm('Are you sure you want to log out?')) return;
     stopPolling();
+    mapModule.stopLiveLocation?.();
     await api.logout();
     api.clearSession();
     window.location.reload();
@@ -396,6 +409,7 @@ window.switchTab = (tabName) => {
     if (tabName === 'map') {
         setTimeout(() => mapModule.refreshSize?.(), 150);
         setTimeout(() => mapModule.refreshSize?.(), 500);
+        setTimeout(() => mapModule.startLiveLocation?.(), 300);
     }
     if (tabName === 'hive') loadHive();
     if (tabName === 'lanes') loadLanes();
@@ -1139,7 +1153,20 @@ window.handleAdminAction = async (uid, approve) => {
 // 22. MAP INTEGRATION
 // ============================================================================
 function initMap() {
-    mapModule.init('map', handleMapClick);
+    mapModule.init('map', handleMapClick, {
+        onMessageAgent: async ({ phone, name, action, text }) => {
+            const myPhone = state.user?.phone || '';
+            const ids = [myPhone, phone].sort();
+            const roomId = `dm-${ids[0]}-${ids[1]}`;
+
+            await openChat(roomId, name || 'SteerAgent');
+
+            if (action === 'quick' && text) {
+                DOM.chatInput.value = text;
+                setTimeout(() => sendMessage(), 400);
+            }
+        }
+    });
 
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -1150,6 +1177,20 @@ function initMap() {
             { enableHighAccuracy: false, maximumAge: 60000, timeout: 5000 }
         );
     }
+
+    // Listen for "savePin" events from search results
+    window.addEventListener('savePin', (e) => {
+        state.pendingLocation = e.detail;
+        openModal('location-modal');
+    });
+
+    // Auto-update user location when watched
+    window.addEventListener('userLocationUpdate', (e) => {
+        state.userLocation = e.detail;
+    });
+
+    // Start live location
+    mapModule.startLiveLocation();
 }
 
 function handleMapClick(lat, lng) {
@@ -1245,7 +1286,7 @@ async function broadcastPresence() {
 
             const vehicles = await api.activeVehicles();
             state.activeVehicles = vehicles;
-            mapModule.renderVehicles?.(vehicles);
+            mapModule.renderVehicles(vehicles, state.userLocation);
         },
         (err) => console.warn('Location error:', err.message),
         { enableHighAccuracy: true, maximumAge: 15000, timeout: 10000 }
