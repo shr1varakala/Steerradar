@@ -1,9 +1,9 @@
 /**
- * Steeradar backend — v8.1
- * Clean, verified, no duplicate params, no long template issues
+ * Steeradar backend — v8.2
+ * Clean, verified, welcome email with personal note from SteerMan
  */
 
-const VERSION = '8.1';
+const VERSION = '8.2';
 const APP_NAME = 'Steeradar';
 const APP_URL = 'https://suryasticsai.github.io/Steeradar/';
 const LOGO_URL = 'https://raw.githubusercontent.com/suryasticsai/Steeradar/main/steerardar-logo.png';
@@ -301,17 +301,80 @@ function buildOtp(code, purpose) {
   return emailShell(body);
 }
 
-function buildWelcome(name, vehicle, community) {
-  const first = escapeHtml((name || '').split(' ')[0] || 'driver');
-  const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:24px;font-weight:800;letter-spacing:-0.4px;">Welcome aboard, ' + first + '! 🎉</h1>'
-    + '<p style="margin:0 0 28px;color:' + MUTED + ';font-size:15px;line-height:1.6;">Your Steeradar account is ready' + (community ? ' in ' + escapeHtml(community) : '') + '. Here\'s what you can do:</p>'
-    + featureTile('🚌', 'Post your lane', 'Share your route and seats')
-    + featureTile('💬', 'Chat with drivers', 'Real-time peer-to-peer messaging')
-    + featureTile('📍', 'Track live', 'See vehicles approaching in real time')
-    + '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 0;background:#F0FDFA;border-radius:12px;"><tr><td style="padding:16px 18px;">'
-    + '<div style="color:' + TEAL + ';font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;margin-bottom:4px;">Your vehicle</div>'
-    + '<div style="color:' + INK + ';font-size:18px;font-weight:700;font-family:\'SF Mono\',monospace;letter-spacing:2px;">' + escapeHtml(vehicle) + '</div>'
-    + '</td></tr></table>';
+/**
+ * Beautiful personalized welcome email with personal note from SteerMan.
+ */
+function buildWelcome(email, name, vehicle, community, phone) {
+  const firstName = escapeHtml((name || 'Driver').split(' ')[0]);
+  const safeEmail = escapeHtml(email || '');
+  const safePhone = escapeHtml(phone || '');
+  const safeVehicle = escapeHtml(vehicle || '');
+  const safeCommunity = escapeHtml(community || 'Not specified');
+
+  // Personal Note from SteerMan
+  const personalNoteHTML = `
+    <div style="margin: 28px 0; padding: 20px; border-left: 4px solid ${CORAL}; background: linear-gradient(135deg, #FEF2F2 0%, #FFF5F5 100%); border-radius: 0 10px 10px 0;">
+      <div style="display:block; margin-bottom:12px;">
+        <span style="display:inline-block; background:${CORAL}; color:#FFFFFF; font-size:10px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; padding:5px 12px; border-radius:20px;">💌 Personal Note</span>
+      </div>
+      <p style="margin: 0; color: ${INK}; font-size: 15px; line-height: 1.7; font-style: italic;">
+        "Hey ${firstName}, I'm absolutely thrilled to welcome you to the Steeradar family! This platform was built for drivers, by drivers. Our goal is to make your daily commute safer, more connected, and more rewarding. If you ever have a suggestion or just want to chat, the Hive is the place to be. Happy driving!"
+      </p>
+      <p style="margin: 14px 0 0; color: ${MUTED}; font-size: 13px; font-weight: 700; text-align: right;">
+        — SteerMan<br>
+        <span style="font-weight: 400; font-size: 11px; color: ${SOFT};">Maker of Steeradar</span>
+      </p>
+    </div>
+  `;
+
+  // User Details Section
+  const userDetailsHTML = `
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0 0; background:#F8F9FB; border-radius:14px; border: 1px solid #E5E7EB;">
+      <tr><td style="padding: 20px 22px;">
+        <div style="color: ${TEAL}; font-size: 11px; font-weight: 800; letter-spacing: 1.6px; text-transform: uppercase; margin-bottom: 16px;">📋 Your Account Details</div>
+        ${rowKV('Name', name)}
+        ${rowKV('User Type', 'RearAgent')}
+        ${rowKV('User ID (Phone)', safePhone, true)}
+        ${rowKV('Email', safeEmail)}
+        ${rowKV('Vehicle', safeVehicle)}
+        ${rowKV('Community', safeCommunity)}
+      </td></tr>
+    </table>
+  `;
+
+  // Thank You Section
+  const thankYouHTML = `
+    <div style="margin: 28px 0 0; padding: 20px; text-align: center; background: linear-gradient(135deg, ${TEAL} 0%, ${TEAL2} 100%); border-radius: 12px;">
+      <p style="margin: 0; color: #FFFFFF; font-size: 16px; font-weight: 700; line-height: 1.5;">
+        🙏 Thank you for joining our community!
+      </p>
+      <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 13px; line-height: 1.6;">
+        We're excited to have you on board. Let's make every ride memorable.
+      </p>
+    </div>
+  `;
+
+  // Assemble Full Body
+  const body = `
+    <h1 style="margin:0 0 10px;color:${INK};font-size:26px;font-weight:800;letter-spacing:-0.4px;">Welcome aboard, ${firstName}! 🎉</h1>
+    <p style="margin:0 0 26px;color:${MUTED};font-size:15px;line-height:1.6;">
+      Your Steeradar account is ready${community ? ' in <strong style="color:' + INK + ';">' + escapeHtml(community) + '</strong>' : ''}. Here's what you can do now:
+    </p>
+    
+    ${featureTile('🚌', 'Post your lane', 'Share your route and available seats')}
+    ${featureTile('💬', 'Chat with drivers', 'Real-time peer-to-peer messaging')}
+    ${featureTile('📍', 'Track live', 'See vehicles approaching in real time')}
+    ${featureTile('⭐', 'Build trust', 'Rate and get rated after each ride')}
+    
+    ${personalNoteHTML}
+    ${userDetailsHTML}
+    ${thankYouHTML}
+    
+    <p style="margin: 24px 0 0; color: ${SOFT}; font-size: 12px; line-height: 1.7; text-align: center;">
+      Need help? Just reply to this email or find us in the Hive.<br>
+      We're always here for you.
+    </p>
+  `;
 
   return emailShell(body);
 }
@@ -373,10 +436,10 @@ function sendOtpEmail(to, code, purpose) {
   return sendMail(to, subject, buildOtp(code, purpose), plain);
 }
 
-function sendWelcomeEmail(to, name, vehicle, community) {
-  const subject = '🎉 Welcome to Steeradar, ' + (name.split(' ')[0] || 'friend') + '!';
-  const plain = 'Welcome ' + name + '! Vehicle ' + vehicle + ' is linked.';
-  return sendMail(to, subject, buildWelcome(name, vehicle, community), plain);
+function sendWelcomeEmail(to, name, vehicle, community, phone, email) {
+  const subject = '🎉 Welcome to Steeradar, ' + ((name || '').split(' ')[0] || 'friend') + '!';
+  const plain = 'Welcome ' + name + '! Your vehicle ' + vehicle + ' is now linked to Steeradar. User ID: ' + phone + '. Thanks for joining!';
+  return sendMail(to, subject, buildWelcome(email || to, name, vehicle, community, phone), plain);
 }
 
 function sendReceiptEmail(to, driver, from, to_, distance, fare, duration) {
@@ -680,7 +743,13 @@ H.register = function (b) {
   updateRow('otps', otp._row, { consumed: '1' });
 
   const token = createSession(phone, b.device);
-  try { sendWelcomeEmail(email, name, vehicle, b.community); } catch (e) {}
+
+  // Send welcome email with all the user details
+  try {
+    sendWelcomeEmail(email, name, vehicle, b.community, phone, email);
+  } catch (e) {
+    Logger.log('Welcome email failed: ' + e);
+  }
 
   logAudit(phone, 'register', vehicle);
   return { ok: true, token: token, user: publicSelf(findUser(phone)) };
@@ -1412,7 +1481,14 @@ function testEmail() {
 
 function testWelcome() {
   const to = Session.getActiveUser().getEmail();
-  const ok = sendWelcomeEmail(to, 'Test Rider', 'KA01AB1234', 'Indiranagar');
+  const ok = sendWelcomeEmail(
+    to,
+    'Test Rider',
+    'KA01AB1234',
+    'Indiranagar',
+    '9876543210',
+    to
+  );
   Logger.log('Welcome email: ' + (ok ? 'OK' : 'FAILED'));
 }
 
