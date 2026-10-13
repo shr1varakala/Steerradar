@@ -1,14 +1,12 @@
 /**
  * ============================================================================
- * STEERADAR FRONTEND CONTROLLER (v12.0)
+ * STEERADAR FRONTEND CONTROLLER (v12.1)
  * ============================================================================
- * Features:
- *  - Light/Dark theme toggle (saved to localStorage)
- *  - Auth (email or phone, OTP + password)
- *  - Lanes, Hive, Chat, Neighborhood Chat, Trips
- *  - Map with search, filter chips, recenter, live location, agent DM
- *  - Compressed + sequential + named image uploads
- *  - Admin panel, Logger with long-press debug
+ * Fixes in v12.1:
+ *  - Exposed window.mapModule so inline onclick handlers work
+ *  - Debounced broadcastPresence to prevent rate limit spam
+ *  - Light/dark theme toggle
+ *  - Map search, filter chips, recenter, agent DM
  * ============================================================================
  */
 
@@ -22,6 +20,7 @@ import { logger } from './logger.js';
 const CONFIG = window.STEERADAR || {};
 const POLL_INTERVAL = 20000;
 const PRESENCE_INTERVAL = 20000;
+const PRESENCE_MIN_GAP = 15000; // never send presence more than once per 15s
 const CHAT_POLL_INTERVAL = 5000;
 const TOAST_DURATION = CONFIG.TOAST_DURATION_MS || 2400;
 
@@ -50,6 +49,10 @@ const state = {
     isLoading: { lanes: false, hive: false, chat: false },
     isOnline: navigator.onLine
 };
+
+// Guard against presence spam
+let _lastPresenceSent = 0;
+let _presenceInFlight = false;
 
 // ============================================================================
 // 3. DOM CACHE
@@ -82,7 +85,7 @@ const DOM = {
 document.addEventListener('DOMContentLoaded', async () => {
     logger.init();
 
-    console.log('%c SteerRadar v12.0 booted ',
+    console.log('%c SteerRadar v12.1 booted ',
         'background:#00d4a0;color:#000;font-weight:800;padding:4px 10px;border-radius:4px;');
 
     // Apply saved theme
@@ -427,16 +430,13 @@ function updateUIForRole() {
         state.user.role === 'agent' ? 'SteerAgent' : 'RearAgent';
     if (DOM.profileAvatar) DOM.profileAvatar.src = avatar;
 
-    // Admin button
     toggleVisibility(DOM.adminBtn, state.user.isAdmin);
 
-    // Map control buttons (alert / ghost / trip)
     const isAgent = state.user.role === 'agent';
     toggleVisibility(DOM.ctrlAlert, isAgent);
     toggleVisibility(DOM.ctrlGhost, isAgent);
     toggleVisibility(DOM.ctrlTrip, isAgent);
 
-    // Become agent section
     if (isAgent) {
         toggleVisibility(DOM.becomeAgentSection, false);
         toggleVisibility(DOM.pendingAgentSection, false);
@@ -554,7 +554,6 @@ async function loadLanes(silent = false) {
     state.allLanes = lanes;
     state.isLoading.lanes = false;
 
-    // Apply active filter
     let filtered = [...lanes];
     if (state.activeMapFilter === 'seats') filtered = filtered.filter(l => l.seats > 0);
     if (state.activeMapFilter === 'mine') filtered = filtered.filter(l => l.own);
@@ -912,7 +911,7 @@ window.handleFABClick = () => {
 };
 
 // ============================================================================
-// 17. CREATE LANE — compressed + named
+// 17. CREATE LANE
 // ============================================================================
 async function handleCreateLane(e) {
     e.preventDefault();
@@ -964,7 +963,7 @@ async function handleCreateLane(e) {
 }
 
 // ============================================================================
-// 18. CREATE HIVE POST — compressed + named
+// 18. CREATE HIVE POST
 // ============================================================================
 async function handleCreateHivePost(e) {
     e.preventDefault();
@@ -1027,7 +1026,7 @@ async function handleCreateHivePost(e) {
 }
 
 // ============================================================================
-// 19. EDIT PROFILE — compressed + named avatar
+// 19. EDIT PROFILE
 // ============================================================================
 window.openEditProfile = () => {
     if (!state.user) return;
@@ -1080,7 +1079,7 @@ async function handleEditProfile(e) {
 }
 
 // ============================================================================
-// 20. STEERAGENT APPLICATION — compressed + sequential + named
+// 20. STEERAGENT APPLICATION
 // ============================================================================
 async function handleSteerAgentApplication(e) {
     e.preventDefault();
@@ -1327,11 +1326,19 @@ async function loadSavedPoints() {
 }
 
 // ============================================================================
-// 23. LIVE PRESENCE
+// 23. LIVE PRESENCE (DEBOUNCED)
 // ============================================================================
 async function broadcastPresence() {
     if (!state.user || state.user.role !== 'agent' || state.user.ghostMode) return;
     if (!navigator.geolocation) return;
+
+    // Debounce guard — skip if sent recently
+    const now = Date.now();
+    if (now - _lastPresenceSent < PRESENCE_MIN_GAP) return;
+    if (_presenceInFlight) return;
+
+    _presenceInFlight = true;
+    _lastPresenceSent = now;
 
     navigator.geolocation.getCurrentPosition(
         async (pos) => {
@@ -1358,8 +1365,13 @@ async function broadcastPresence() {
             const vehicles = await api.activeVehicles();
             state.activeVehicles = vehicles;
             mapModule.renderVehicles(vehicles, state.userLocation);
+
+            _presenceInFlight = false;
         },
-        (err) => console.warn('Location error:', err.message),
+        (err) => {
+            console.warn('Location error:', err.message);
+            _presenceInFlight = false;
+        },
         { enableHighAccuracy: true, maximumAge: 15000, timeout: 10000 }
     );
 }
@@ -1681,13 +1693,15 @@ function skeletonCards(count) {
 }
 
 // ============================================================================
-// 30. GLOBAL EXPORTS
+// 30. GLOBAL EXPORTS (CRITICAL: exposes modules to inline HTML handlers)
 // ============================================================================
+window.mapModule = mapModule;
+window.api = api;
+window.logger = logger;
+
 window.toggleGhostMode = () => {
     const checkbox = document.getElementById('toggle-ghost-mode');
     if (checkbox) checkbox.click();
 };
 
-window.logger = logger;
-window.mapModule = mapModule;
 console.log('[app] All handlers initialized');
