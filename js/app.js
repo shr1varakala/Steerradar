@@ -1,6 +1,14 @@
 /**
  * ============================================================================
- * STEERADAR FRONTEND CONTROLLER (v9.2) - With Logger + Long-press debug
+ * STEERADAR FRONTEND CONTROLLER (v10.0)
+ * ============================================================================
+ * Complete client: auth, lanes, hive, chat, neighborhood chat, trips,
+ * live presence, admin panel, map integration, logger, and PWA.
+ * 
+ * DEPENDENCIES:
+ *   js/api.js     - Backend gateway
+ *   js/map.js     - MapLibre GL wrapper (v10.0)
+ *   js/logger.js  - In-app logger
  * ============================================================================
  */
 
@@ -9,7 +17,7 @@ import { mapModule } from './map.js';
 import { logger } from './logger.js';
 
 // ============================================================================
-// 1. CONFIGURATION
+// 1. CONFIG
 // ============================================================================
 const CONFIG = window.STEERADAR || {};
 const POLL_INTERVAL = 20000;
@@ -34,7 +42,6 @@ const state = {
     pendingLocation: null,
     userLocation: null,
     activeTrip: null,
-    tripPolyline: null,
     tripPoints: [],
     tripWatchId: null,
     intervals: { poll: null, presence: null, chat: null },
@@ -67,13 +74,12 @@ const DOM = {
 };
 
 // ============================================================================
-// 4. INITIALIZATION
+// 4. BOOT
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
-    // Initialize logger FIRST so it captures everything from boot
     logger.init();
 
-    console.log('%c SteerRadar v9.2 booted ',
+    console.log('%c SteerRadar v10.0 booted ',
         'background:#00d4a0;color:#000;font-weight:800;padding:4px 10px;border-radius:4px;');
 
     setupEventListeners();
@@ -152,22 +158,18 @@ function setupLogoLongPress() {
         if (Math.abs(pt.clientX - startX) > 10 || Math.abs(pt.clientY - startY) > 10) cancel();
     };
 
-    // Touch events (mobile)
     logo.addEventListener('touchstart', start, { passive: true });
     logo.addEventListener('touchend', cancel);
     logo.addEventListener('touchcancel', cancel);
     logo.addEventListener('touchmove', move, { passive: true });
 
-    // Mouse events (desktop)
     logo.addEventListener('mousedown', start);
     logo.addEventListener('mouseup', cancel);
     logo.addEventListener('mouseleave', cancel);
     logo.addEventListener('mousemove', move);
 
-    // Prevent context menu on long-press
     logo.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // Normal click still works
     logo.addEventListener('click', () => {
         if (state.activeTab !== 'lanes') switchTab('lanes');
     });
@@ -250,7 +252,8 @@ async function handleSignIn(e) {
         updateUIForRole();
         showToast(`Welcome back, ${state.user.name.split(' ')[0]}!`, 'success');
     } else {
-        showToast(api.lastError || 'Login failed', 'error');
+        const errMsg = (res && res.error) || api.lastError || 'Login failed';
+        showToast(errMsg, 'error');
     }
 }
 
@@ -285,7 +288,8 @@ async function handleSignupStep1(e) {
         openModal('otp-modal');
         setTimeout(() => document.getElementById('otp-code')?.focus(), 300);
     } else {
-        showToast((res && res.error) || api.lastError || 'Failed to send OTP', 'error');
+        const errMsg = (res && res.error) || api.lastError || 'Failed to send OTP';
+        showToast(errMsg, 'error');
     }
 }
 
@@ -315,7 +319,8 @@ window.verifyOTP = async () => {
         updateUIForRole();
         showToast('Account created successfully!', 'success');
     } else {
-        showToast((regRes && regRes.error) || api.lastError || 'Registration failed', 'error');
+        const errMsg = (regRes && regRes.error) || api.lastError || 'Registration failed';
+        showToast(errMsg, 'error');
     }
 };
 
@@ -386,6 +391,7 @@ window.switchTab = (tabName) => {
 
     if (tabName === 'map') {
         setTimeout(() => mapModule.refreshSize?.(), 150);
+        setTimeout(() => mapModule.refreshSize?.(), 500);
     }
     if (tabName === 'hive') loadHive();
     if (tabName === 'lanes') loadLanes();
@@ -417,7 +423,7 @@ window.switchAuthTab = (tab) => {
 };
 
 // ============================================================================
-// 11. AUTO-REFRESH & POLLING
+// 11. AUTO-REFRESH
 // ============================================================================
 function startAutoRefresh() {
     stopPolling();
@@ -499,6 +505,15 @@ function createLaneCardHTML(lane) {
     const progress = Math.min((seats / maxSeats) * 100, 100);
     const color = seats > 5 ? 'var(--primary)' : (seats > 2 ? 'var(--warning)' : 'var(--danger)');
 
+    // Calculate distance from user (if we have their location)
+    let distanceHTML = '';
+    if (state.userLocation && lane.lat && lane.lng) {
+        const km = mapModule.calculateDistance(state.userLocation.lat, state.userLocation.lng, lane.lat, lane.lng);
+        if (km > 0) {
+            distanceHTML = `<span class="distance-pill mt-2"><i class="fas fa-route"></i> ${mapModule.formatDistance(km)}</span>`;
+        }
+    }
+
     return `
         <div class="lane-card">
             <div class="lane-header">
@@ -516,6 +531,7 @@ function createLaneCardHTML(lane) {
                     <div class="lane-tags">
                         <span class="tag tag-live">LIVE</span>
                         <span class="tag tag-fare">${escapeHTML(lane.vehicleType || 'Any')}</span>
+                        ${distanceHTML}
                     </div>
                 </div>
             </div>
@@ -530,6 +546,9 @@ function createLaneCardHTML(lane) {
                     </div>
                 </div>
                 <div class="lane-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="showLaneOnMap('${lane.id}')">
+                        <i class="fas fa-map-marker-alt"></i>
+                    </button>
                     <button class="btn btn-secondary btn-sm"
                         onclick="openChat('${lane.id}', '${escapeHTML(lane.ownerName || 'Driver')}')">
                         <i class="fas fa-comment"></i> Chat
@@ -545,6 +564,42 @@ function createLaneCardHTML(lane) {
 window.requestSeat = (laneId) => {
     if (!state.user) return showToast('Please sign in first', 'error');
     showToast('Seat request sent! The driver will respond in chat.', 'success');
+};
+
+window.showLaneOnMap = async (laneId) => {
+    const lane = state.lanes.find(l => l.id === laneId);
+    if (!lane) return showToast('Lane not found', 'error');
+
+    if (!lane.lat || !lane.lng) return showToast('No location available', 'warning');
+
+    switchTab('map');
+    setTimeout(() => {
+        mapModule.centerOn(lane.lat, lane.lng, 15);
+        const popup = `
+            <div style="text-align:center; padding:4px;">
+                <div style="font-weight:700; margin-bottom:6px; color:#00d4a0;">${escapeHTML(lane.title || 'Lane')}</div>
+                <div style="font-size:12px; color:#a0a0a0; margin-bottom:10px;">${escapeHTML(lane.ownerName || 'Driver')}</div>
+                <button onclick="navigateToLane('${laneId}')" style="
+                    background:#00d4a0; color:#000; border:none; padding:8px 16px;
+                    border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px;
+                    margin-right:6px;
+                "><i class="fas fa-directions"></i> Navigate</button>
+                <button onclick="openChat('${laneId}', '${escapeHTML(lane.ownerName || 'Driver')}')" style="
+                    background:#1a1a1a; color:#fff; border:1px solid #2a2a2a; padding:8px 16px;
+                    border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px;
+                "><i class="fas fa-comment"></i> Chat</button>
+            </div>
+        `;
+        mapModule.dropMarker(lane.lat, lane.lng, popup);
+    }, 400);
+};
+
+window.navigateToLane = (laneId) => {
+    const lane = state.lanes.find(l => l.id === laneId);
+    if (!lane) return;
+    const fromLat = state.userLocation?.lat || null;
+    const fromLng = state.userLocation?.lng || null;
+    mapModule.navigateTo(lane.lat, lane.lng, fromLat, fromLng);
 };
 
 // ============================================================================
@@ -729,6 +784,9 @@ function scrollToBottom() {
     DOM.chatMessages.scrollTop = DOM.chatMessages.scrollHeight;
 }
 
+// ============================================================================
+// 15. NEIGHBORHOOD CHAT
+// ============================================================================
 function getNeighborhoodRoomId() {
     const lat = state.userLocation?.lat || CONFIG.DEFAULT_CENTER?.lat || 17.3850;
     const lng = state.userLocation?.lng || CONFIG.DEFAULT_CENTER?.lng || 78.4867;
@@ -752,7 +810,7 @@ window.openNeighborhoodChat = async () => {
 };
 
 // ============================================================================
-// 15. FAB
+// 16. FAB
 // ============================================================================
 window.handleFABClick = () => {
     if (!state.user) return showToast('Please sign in first', 'error');
@@ -768,7 +826,7 @@ window.handleFABClick = () => {
 };
 
 // ============================================================================
-// 16. CREATE LANE
+// 17. CREATE LANE
 // ============================================================================
 async function handleCreateLane(e) {
     e.preventDefault();
@@ -789,10 +847,11 @@ async function handleCreateLane(e) {
             title: document.getElementById('lane-title').value.trim(),
             description: document.getElementById('lane-description').value.trim(),
             seats: document.getElementById('lane-seats').value,
+            total: document.getElementById('lane-seats').value,
             vehicleType: document.getElementById('lane-vehicle-type').value,
             photo: photoUrl,
-            lat: CONFIG.DEFAULT_CENTER?.lat || 17.3850,
-            lng: CONFIG.DEFAULT_CENTER?.lng || 78.4867
+            lat: state.userLocation?.lat || CONFIG.DEFAULT_CENTER?.lat || 17.3850,
+            lng: state.userLocation?.lng || CONFIG.DEFAULT_CENTER?.lng || 78.4867
         };
 
         const res = await api.insertLane(payload);
@@ -812,7 +871,7 @@ async function handleCreateLane(e) {
 }
 
 // ============================================================================
-// 17. CREATE HIVE POST
+// 18. CREATE HIVE POST
 // ============================================================================
 async function handleCreateHivePost(e) {
     e.preventDefault();
@@ -848,8 +907,8 @@ async function handleCreateHivePost(e) {
             photo: photoUrl,
             mediaUrl,
             mediaType,
-            lat: CONFIG.DEFAULT_CENTER?.lat || 17.3850,
-            lng: CONFIG.DEFAULT_CENTER?.lng || 78.4867
+            lat: state.userLocation?.lat || CONFIG.DEFAULT_CENTER?.lat || 17.3850,
+            lng: state.userLocation?.lng || CONFIG.DEFAULT_CENTER?.lng || 78.4867
         };
 
         const res = await api.insertHive(payload);
@@ -869,7 +928,7 @@ async function handleCreateHivePost(e) {
 }
 
 // ============================================================================
-// 18. PROFILE EDIT
+// 19. EDIT PROFILE
 // ============================================================================
 window.openEditProfile = () => {
     if (!state.user) return;
@@ -917,7 +976,7 @@ async function handleEditProfile(e) {
 }
 
 // ============================================================================
-// 19. STEERAGENT APPLICATION
+// 20. STEERAGENT APPLICATION
 // ============================================================================
 async function handleSteerAgentApplication(e) {
     e.preventDefault();
@@ -975,7 +1034,7 @@ async function handleSteerAgentApplication(e) {
 }
 
 // ============================================================================
-// 20. ADMIN PANEL
+// 21. ADMIN PANEL
 // ============================================================================
 window.loadAdminApplications = async () => {
     if (!state.user?.isAdmin) return;
@@ -1029,10 +1088,20 @@ window.handleAdminAction = async (uid, approve) => {
 };
 
 // ============================================================================
-// 21. MAP INTEGRATION
+// 22. MAP INTEGRATION
 // ============================================================================
 function initMap() {
     mapModule.init('map', handleMapClick);
+    // Get initial user location silently for distance calcs
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                state.userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            },
+            () => {},
+            { enableHighAccuracy: false, maximumAge: 60000, timeout: 5000 }
+        );
+    }
 }
 
 function handleMapClick(lat, lng) {
@@ -1040,19 +1109,35 @@ function handleMapClick(lat, lng) {
 
     state.pendingLocation = { lat, lng };
 
+    const distanceText = state.userLocation
+        ? `<p style="margin:5px 0; font-size:11px; color:#00d4a0;">${mapModule.formatDistance(mapModule.calculateDistance(state.userLocation.lat, state.userLocation.lng, lat, lng))} away</p>`
+        : '';
+
     mapModule.dropMarker(lat, lng, `
-        <div style="text-align:center; font-family:sans-serif; padding: 4px;">
+        <div style="text-align:center; font-family:sans-serif; padding: 6px;">
             <p style="margin:5px 0; font-size:12px; color:#a0a0a0;">
                 ${lat.toFixed(4)}, ${lng.toFixed(4)}
             </p>
+            ${distanceText}
             <button onclick="openModal('location-modal')"
                 style="background:#00d4a0; color:#000; border:none; padding:8px 16px;
-                border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px;">
+                border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px; margin-top:4px;">
                 <i class="fas fa-bookmark"></i> Save Location
+            </button>
+            <button onclick="navigateToPoint(${lat},${lng})"
+                style="background:#1a1a1a; color:#fff; border:1px solid #2a2a2a; padding:8px 16px;
+                border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px; margin-top:4px;">
+                <i class="fas fa-directions"></i> Navigate
             </button>
         </div>
     `);
 }
+
+window.navigateToPoint = (lat, lng) => {
+    const fromLat = state.userLocation?.lat || null;
+    const fromLng = state.userLocation?.lng || null;
+    mapModule.navigateTo(lat, lng, fromLat, fromLng);
+};
 
 window.confirmSaveLocation = async () => {
     const name = document.getElementById('location-name').value.trim();
@@ -1082,7 +1167,7 @@ async function loadSavedPoints() {
 }
 
 // ============================================================================
-// 22. LIVE PRESENCE
+// 23. LIVE PRESENCE
 // ============================================================================
 async function broadcastPresence() {
     if (!state.user || state.user.role !== 'agent' || state.user.ghostMode) return;
@@ -1104,7 +1189,7 @@ async function broadcastPresence() {
             if (state.activeTrip) {
                 const point = [latitude, longitude];
                 const last = state.tripPoints[state.tripPoints.length - 1];
-                if (!last || calculateDistance([last, point]) > 0.01) {
+                if (!last || mapModule.calculateDistance(last[0], last[1], latitude, longitude) > 0.01) {
                     state.tripPoints.push(point);
                     mapModule.updatePolyline?.(state.tripPoints);
                 }
@@ -1120,7 +1205,7 @@ async function broadcastPresence() {
 }
 
 // ============================================================================
-// 23. ALERTS
+// 24. ALERTS
 // ============================================================================
 window.reportAlert = async (type) => {
     if (!state.user) return showToast('Sign in first', 'error');
@@ -1139,7 +1224,7 @@ window.reportAlert = async (type) => {
 };
 
 // ============================================================================
-// 24. GHOST MODE
+// 25. GHOST MODE
 // ============================================================================
 async function handleGhostModeToggle(e) {
     const isGhost = e.target.checked;
@@ -1161,7 +1246,7 @@ async function handleGhostModeToggle(e) {
 }
 
 // ============================================================================
-// 25. TRIPS
+// 26. TRIPS
 // ============================================================================
 window.toggleTrip = async () => {
     if (!state.user || state.user.role !== 'agent') {
@@ -1175,20 +1260,21 @@ window.toggleTrip = async () => {
         const endLat = state.userLocation?.lat || null;
         const endLng = state.userLocation?.lng || null;
 
+        const distance = mapModule.calculatePolylineDistance(state.tripPoints);
+
         const res = await api.endTrip(state.activeTrip.id, {
             endLat,
             endLng,
-            distanceKm: calculateDistance(state.tripPoints)
+            distanceKm: distance
         });
 
         resetButton(btn, '<i class="fas fa-play"></i>');
         btn.classList.remove('active');
 
         if (res) {
-            showToast(`Trip ended! Distance: ${calculateDistance(state.tripPoints)} km`, 'success');
+            showToast(`Trip ended! Distance: ${mapModule.formatDistance(distance)}`, 'success');
             state.activeTrip = null;
             state.tripPoints = [];
-            state.tripPolyline = null;
             mapModule.clearPolylines?.();
 
             if (state.tripWatchId !== null) {
@@ -1206,12 +1292,12 @@ window.toggleTrip = async () => {
         const res = await api.startTrip({ startLat, startLng });
         resetButton(btn, '<i class="fas fa-stop"></i>');
 
-        if (res) {
+        if (res && res.id) {
             showToast('Trip started! Share your route.', 'success');
             state.activeTrip = res;
             state.tripPoints = [[startLat, startLng]];
             btn.classList.add('active');
-            state.tripPolyline = mapModule.drawPolyline?.(state.tripPoints);
+            mapModule.drawPolyline?.(state.tripPoints);
             startTripTracking();
         } else {
             showToast('Failed to start trip', 'error');
@@ -1227,7 +1313,7 @@ function startTripTracking() {
             const { latitude, longitude } = pos.coords;
             const point = [latitude, longitude];
             const last = state.tripPoints[state.tripPoints.length - 1];
-            if (last && calculateDistance([last, point]) < 0.01) return;
+            if (last && mapModule.calculateDistance(last[0], last[1], latitude, longitude) < 0.01) return;
 
             state.tripPoints.push(point);
             mapModule.updatePolyline?.(state.tripPoints);
@@ -1241,23 +1327,6 @@ function startTripTracking() {
         (err) => console.warn('Trip tracking error:', err.message),
         { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
     );
-}
-
-function calculateDistance(points) {
-    if (!points || points.length < 2) return 0;
-    let total = 0;
-    for (let i = 1; i < points.length; i++) {
-        const [lat1, lon1] = points[i-1];
-        const [lat2, lon2] = points[i];
-        const R = 6371;
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat/2)**2 +
-                  Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) *
-                  Math.sin(dLon/2)**2;
-        total += R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    }
-    return Math.round(total * 100) / 100;
 }
 
 window.loadTrips = async () => {
@@ -1306,7 +1375,7 @@ window.loadTrips = async () => {
 };
 
 // ============================================================================
-// 26. IMAGE PREVIEW
+// 27. IMAGE PREVIEW
 // ============================================================================
 function previewImage(event, previewId) {
     const file = event.target.files?.[0];
@@ -1326,7 +1395,7 @@ function previewImage(event, previewId) {
 }
 
 // ============================================================================
-// 27. TOASTS
+// 28. TOASTS
 // ============================================================================
 function showToast(message, type = 'info') {
     let container = document.getElementById('toast-container');
@@ -1355,7 +1424,7 @@ function showToast(message, type = 'info') {
 }
 
 // ============================================================================
-// 28. UTILITIES
+// 29. UTILITIES
 // ============================================================================
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
@@ -1421,7 +1490,7 @@ function skeletonCards(count) {
 }
 
 // ============================================================================
-// 29. PWA INSTALL PROMPT
+// 30. PWA INSTALL PROMPT
 // ============================================================================
 function setupPWAInstallPrompt() {
     let deferredPrompt = null;
@@ -1462,14 +1531,13 @@ function setupPWAInstallPrompt() {
 }
 
 // ============================================================================
-// 30. GLOBAL EXPORTS
+// 31. GLOBAL EXPORTS
 // ============================================================================
 window.toggleGhostMode = () => {
     const checkbox = document.getElementById('toggle-ghost-mode');
     if (checkbox) checkbox.click();
 };
 
-// Expose logger for debugging from console
 window.logger = logger;
 
 console.log('[app] All handlers initialized');
