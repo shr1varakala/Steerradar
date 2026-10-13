@@ -1,23 +1,32 @@
 /**
  * ============================================================================
- * STEERADAR MAP MODULE (v7.5)
+ * STEERADAR MAP MODULE (v9.0)
  * ============================================================================
  * Wraps Leaflet.js and provides a clean API for the main app.
  * Handles: initialization, markers, polylines (trip routes), alerts,
- * geolocation, and vehicle rendering.
+ * geolocation, vehicle rendering, and dark theme styling.
+ * 
+ * DEPENDENCIES:
+ * - Leaflet.js loaded globally (via <script> tag in index.html)
+ * - window.STEERADAR config object (from config.js)
  * ============================================================================
  */
 
 const CONFIG = window.STEERADAR || {};
 
+// Module-level state
 let map = null;
 let savedMarker = null;
 let alertMarkers = [];
 let tripPolyline = null;
+let tripGlowPolyline = null;
 let vehicleMarkers = [];
 let userLocationMarker = null;
 
 export const mapModule = {
+    // ========================================================================
+    // INITIALIZATION
+    // ========================================================================
     /**
      * Initialize the Leaflet map with dark theme tiles.
      * @param {string} containerId - The DOM element ID where the map renders.
@@ -30,49 +39,84 @@ export const mapModule = {
             return null;
         }
 
-        // Default to Hyderabad if config missing
+        // Verify Leaflet is loaded
+        if (typeof L === 'undefined') {
+            console.error('[map] Leaflet.js is not loaded! Add the Leaflet script tag.');
+            return null;
+        }
+
+        // Fallback coordinates (Hyderabad)
         const lat = CONFIG.DEFAULT_CENTER?.lat || 17.3850;
         const lng = CONFIG.DEFAULT_CENTER?.lng || 78.4867;
         const zoom = CONFIG.DEFAULT_ZOOM || 13;
 
-        map = L.map(containerId, {
-            zoomControl: false,
-            attributionControl: false
-        }).setView([lat, lng], zoom);
+        // CRITICAL FIX: Ensure container has explicit height BEFORE Leaflet init
+        container.style.height = '100%';
+        container.style.width = '100%';
+        container.style.minHeight = '400px';
 
-        // Dark theme tiles (CartoDB Dark Matter)
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap &copy; CARTO',
-            maxZoom: 19,
-            subdomains: 'abcd'
-        }).addTo(map);
+        try {
+            map = L.map(containerId, {
+                zoomControl: false,
+                attributionControl: false,
+                preferCanvas: true // Better performance for many markers
+            }).setView([lat, lng], zoom);
 
-        // Zoom control at bottom-right
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
+            // Dark theme tiles (CartoDB Dark Matter)
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap &copy; CARTO',
+                maxZoom: 19,
+                subdomains: 'abcd',
+                crossOrigin: true
+            }).addTo(map);
 
-        // Map click handler
-        map.on('click', (e) => {
-            if (typeof onMapClick === 'function') {
-                onMapClick(e.latlng.lat, e.latlng.lng);
-            }
-        });
+            // Zoom control at bottom-right
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-        // Fix sizing issues on mobile
-        setTimeout(() => map.invalidateSize(), 100);
+            // Map click handler
+            map.on('click', (e) => {
+                if (typeof onMapClick === 'function') {
+                    onMapClick(e.latlng.lat, e.latlng.lng);
+                }
+            });
 
-        console.log('[map] Initialized at', lat, lng);
-        return map;
+            // CRITICAL FIX: Force Leaflet to recalculate its size after layout settles
+            // Mobile browsers and tab switches can cause the container to have 0 size initially
+            setTimeout(() => map.invalidateSize(), 100);
+            setTimeout(() => map.invalidateSize(), 500);
+            setTimeout(() => map.invalidateSize(), 1500);
+
+            console.log('[map] Initialized at', lat, lng);
+            return map;
+
+        } catch (err) {
+            console.error('[map] Initialization failed:', err);
+            return null;
+        }
     },
 
     /**
-     * Get the raw Leaflet map instance (advanced use).
+     * Get the raw Leaflet map instance.
      */
     getMap: () => map,
 
-    // ========================================================================
-    // MARKERS
-    // ========================================================================
+    /**
+     * Force Leaflet to recalculate its container size.
+     * Call this after switching tabs or resizing the window.
+     */
+    refreshSize: () => {
+        if (!map) return;
+        requestAnimationFrame(() => {
+            map.invalidateSize();
+        });
+        setTimeout(() => {
+            if (map) map.invalidateSize();
+        }, 250);
+    },
 
+    // ========================================================================
+    // SAVED MARKERS (for saving locations)
+    // ========================================================================
     /**
      * Drop a single saveable marker (used for saving locations).
      */
@@ -85,26 +129,33 @@ export const mapModule = {
             savedMarker = null;
         }
 
-        savedMarker = L.marker([lat, lng], {
-            icon: L.divIcon({
-                className: 'custom-saved-marker',
-                html: `<div style="
-                    width:36px; height:36px; 
-                    background: linear-gradient(135deg, #00d4a0, #00b88a);
-                    border: 3px solid #0a0a0a;
-                    border-radius: 50% 50% 50% 0;
-                    transform: rotate(-45deg);
-                    box-shadow: 0 4px 12px rgba(0,212,160,0.5);
-                    display: flex; align-items: center; justify-content: center;
-                "><i class="fas fa-map-marker-alt" style="
-                    color:#000; font-size:14px; transform: rotate(45deg);
-                "></i></div>`,
-                iconSize: [36, 36],
-                iconAnchor: [18, 36]
-            })
-        }).addTo(map);
+        const customIcon = L.divIcon({
+            className: 'custom-saved-marker',
+            html: `<div style="
+                width: 36px; height: 36px;
+                background: linear-gradient(135deg, #00d4a0, #00b88a);
+                border: 3px solid #0a0a0a;
+                border-radius: 50% 50% 50% 0;
+                transform: rotate(-45deg);
+                box-shadow: 0 4px 12px rgba(0,212,160,0.5);
+                display: flex; align-items: center; justify-content: center;
+            "><i class="fas fa-map-marker-alt" style="
+                color: #000; font-size: 14px; transform: rotate(45deg);
+            "></i></div>`,
+            iconSize: [36, 36],
+            iconAnchor: [18, 36],
+            popupAnchor: [0, -36]
+        });
 
-        if (popupHTML) savedMarker.bindPopup(popupHTML).openPopup();
+        savedMarker = L.marker([lat, lng], { icon: customIcon }).addTo(map);
+
+        if (popupHTML) {
+            savedMarker.bindPopup(popupHTML, {
+                closeButton: false,
+                className: 'custom-popup'
+            }).openPopup();
+        }
+
         return savedMarker;
     },
 
@@ -118,6 +169,9 @@ export const mapModule = {
         }
     },
 
+    // ========================================================================
+    // ALERT MARKERS (Road conditions)
+    // ========================================================================
     /**
      * Add a temporary road alert marker (Pothole, Traffic, etc.).
      * Auto-expires after 1 hour.
@@ -135,12 +189,12 @@ export const mapModule = {
         const icon = L.divIcon({
             className: 'custom-alert-icon',
             html: `<div style="
-                background-color:#1a1a1a; 
-                border:2px solid #ffc107; 
-                border-radius:50%; 
-                width:38px; height:38px; 
-                display:flex; align-items:center; justify-content:center; 
-                font-size:18px; 
+                background-color: #1a1a1a;
+                border: 2px solid #ffc107;
+                border-radius: 50%;
+                width: 38px; height: 38px;
+                display: flex; align-items: center; justify-content: center;
+                font-size: 18px;
                 box-shadow: 0 0 12px rgba(255,193,7,0.6);
             ">${icons[type] || '⚠️'}</div>`,
             iconSize: [38, 38],
@@ -166,14 +220,15 @@ export const mapModule = {
      */
     clearAlerts: () => {
         if (!map) return;
-        alertMarkers.forEach(m => map.removeLayer(m));
+        alertMarkers.forEach(m => {
+            if (map.hasLayer(m)) map.removeLayer(m);
+        });
         alertMarkers = [];
     },
 
     // ========================================================================
-    // TRIP POLYLINES
+    // TRIP POLYLINES (Route drawing)
     // ========================================================================
-
     /**
      * Draw a polyline representing a trip route.
      * @param {Array} coords - Array of [lat, lng] pairs.
@@ -185,23 +240,31 @@ export const mapModule = {
         // Remove existing trip polyline if any
         if (tripPolyline) {
             map.removeLayer(tripPolyline);
+            tripPolyline = null;
+        }
+        if (tripGlowPolyline) {
+            map.removeLayer(tripGlowPolyline);
+            tripGlowPolyline = null;
         }
 
+        // Main visible line
         tripPolyline = L.polyline(coords, {
             color: color,
             weight: 5,
-            opacity: 0.85,
+            opacity: 0.9,
             smoothFactor: 1,
             lineCap: 'round',
             lineJoin: 'round'
         }).addTo(map);
 
-        // Add subtle glow under it
-        L.polyline(coords, {
+        // Subtle glow underneath
+        tripGlowPolyline = L.polyline(coords, {
             color: color,
-            weight: 12,
+            weight: 14,
             opacity: 0.15,
-            smoothFactor: 1
+            smoothFactor: 1,
+            lineCap: 'round',
+            lineJoin: 'round'
         }).addTo(map);
 
         return tripPolyline;
@@ -211,12 +274,13 @@ export const mapModule = {
      * Update an existing trip polyline with new points.
      */
     updatePolyline: (coords) => {
-        if (!tripPolyline || !coords) return;
-        tripPolyline.setLatLngs(coords);
+        if (!coords || coords.length < 2) return;
+        if (tripPolyline) tripPolyline.setLatLngs(coords);
+        if (tripGlowPolyline) tripGlowPolyline.setLatLngs(coords);
     },
 
     /**
-     * Clear all trip polylines.
+     * Clear all polylines.
      */
     clearPolylines: () => {
         if (!map) return;
@@ -226,12 +290,12 @@ export const mapModule = {
             }
         });
         tripPolyline = null;
+        tripGlowPolyline = null;
     },
 
     // ========================================================================
-    // VEHICLES (Live Presence)
+    // VEHICLE MARKERS (Live Presence)
     // ========================================================================
-
     /**
      * Render live vehicle markers from presence data.
      * @param {Array} vehicles - Array of presence objects from api.activeVehicles()
@@ -240,8 +304,12 @@ export const mapModule = {
         if (!map) return;
 
         // Clear old vehicle markers
-        vehicleMarkers.forEach(m => map.removeLayer(m));
+        vehicleMarkers.forEach(m => {
+            if (map.hasLayer(m)) map.removeLayer(m);
+        });
         vehicleMarkers = [];
+
+        if (!Array.isArray(vehicles)) return;
 
         vehicles.forEach(v => {
             if (!v.lat || !v.lng) return;
@@ -261,15 +329,16 @@ export const mapModule = {
                     overflow: hidden;
                 "><img src="${v.photo || 'https://i.pravatar.cc/150?img=12'}" 
                     style="width:100%; height:100%; object-fit:cover;" 
-                    onerror="this.style.display='none'"></div>`,
+                    onerror="this.src='https://i.pravatar.cc/150?img=12'"></div>`,
                 iconSize: [42, 42],
                 iconAnchor: [21, 21]
             });
 
             const marker = L.marker([v.lat, v.lng], { icon }).addTo(map);
+
             marker.bindPopup(`
                 <div style="font-family:sans-serif; padding:4px; min-width:140px;">
-                    <strong>${v.ownerName || 'Driver'}</strong><br>
+                    <strong style="color:#00d4a0;">${v.ownerName || 'Driver'}</strong><br>
                     <span style="font-size:11px; color:#a0a0a0;">
                         ${v.vehicle ? '🚗 ' + v.vehicle : 'On the road'}
                     </span>
@@ -285,31 +354,32 @@ export const mapModule = {
      */
     clearVehicles: () => {
         if (!map) return;
-        vehicleMarkers.forEach(m => map.removeLayer(m));
+        vehicleMarkers.forEach(m => {
+            if (map.hasLayer(m)) map.removeLayer(m);
+        });
         vehicleMarkers = [];
     },
 
     // ========================================================================
     // GEOLOCATION
     // ========================================================================
-
     /**
      * Get the user's current GPS location and center the map.
      * Returns a promise with { lat, lng }.
      */
     locateUser: () => {
         return new Promise((resolve, reject) => {
-            if (!map) return reject('Map not initialized');
-            if (!navigator.geolocation) return reject('Geolocation not supported');
+            if (!map) return reject(new Error('Map not initialized'));
+            if (!navigator.geolocation) return reject(new Error('Geolocation not supported'));
 
             navigator.geolocation.getCurrentPosition(
                 (pos) => {
                     const { latitude, longitude } = pos.coords;
 
                     // Center map on user
-                    map.setView([latitude, longitude], 15);
+                    map.setView([latitude, longitude], 15, { animate: true });
 
-                    // Update / add user location marker
+                    // Update / add user location marker (pulsing blue dot)
                     if (userLocationMarker) {
                         userLocationMarker.setLatLng([latitude, longitude]);
                     } else {
@@ -319,6 +389,15 @@ export const mapModule = {
                             fillColor: '#00d4a0',
                             fillOpacity: 1,
                             weight: 3
+                        }).addTo(map);
+
+                        // Add a pulsing outer ring
+                        L.circleMarker([latitude, longitude], {
+                            radius: 20,
+                            color: '#00d4a0',
+                            fillColor: '#00d4a0',
+                            fillOpacity: 0.15,
+                            weight: 1
                         }).addTo(map);
                     }
 
@@ -353,9 +432,99 @@ export const mapModule = {
     },
 
     /**
-     * Invalidate the map size (fixes rendering glitches when tab switches).
+     * Center the map on a specific coordinate.
      */
-    refreshSize: () => {
-        if (map) setTimeout(() => map.invalidateSize(), 100);
+    centerOn: (lat, lng, zoom = 15) => {
+        if (!map) return;
+        map.setView([lat, lng], zoom, { animate: true });
+    },
+
+    /**
+     * Fit the map bounds to a set of coordinates.
+     */
+    fitBounds: (coords) => {
+        if (!map || !coords || coords.length < 2) return;
+        map.fitBounds(coords, { padding: [50, 50] });
     }
 };
+
+// ============================================================================
+// INJECT CUSTOM CSS FOR LEAFLET DARK THEME
+// ============================================================================
+(function injectMapStyles() {
+    if (document.getElementById('steeradar-map-styles')) return;
+    
+    const style = document.createElement('style');
+    style.id = 'steeradar-map-styles';
+    style.textContent = `
+        /* Leaflet dark theme overrides */
+        .leaflet-container {
+            background: #0a0a0a !important;
+            font-family: inherit !important;
+        }
+        
+        .leaflet-control-zoom {
+            margin-bottom: 110px !important;
+            margin-right: 20px !important;
+        }
+        
+        .leaflet-control-zoom a {
+            background: #1a1a1a !important;
+            color: #ffffff !important;
+            border-color: #2a2a2a !important;
+            width: 40px !important;
+            height: 40px !important;
+            line-height: 40px !important;
+            font-size: 20px !important;
+            transition: all 0.2s ease !important;
+        }
+        
+        .leaflet-control-zoom a:hover {
+            background: #252525 !important;
+            color: #00d4a0 !important;
+        }
+        
+        .leaflet-popup-content-wrapper {
+            background: #1a1a1a !important;
+            color: #ffffff !important;
+            border-radius: 12px !important;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6) !important;
+            border: 1px solid #2a2a2a !important;
+        }
+        
+        .leaflet-popup-tip {
+            background: #1a1a1a !important;
+            border: 1px solid #2a2a2a !important;
+        }
+        
+        .leaflet-popup-content {
+            margin: 12px 14px !important;
+            font-size: 13px !important;
+        }
+        
+        .leaflet-popup-close-button {
+            color: #a0a0a0 !important;
+            padding: 8px !important;
+        }
+        
+        .leaflet-popup-close-button:hover {
+            color: #ffffff !important;
+        }
+        
+        /* Remove default icon backgrounds */
+        .custom-saved-marker,
+        .custom-alert-icon,
+        .custom-vehicle-marker {
+            background: transparent !important;
+            border: none !important;
+        }
+        
+        /* Smooth marker transitions */
+        .leaflet-marker-icon {
+            transition: transform 0.3s ease;
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+console.log('[map] Module loaded');
