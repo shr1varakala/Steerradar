@@ -1,5 +1,5 @@
 /* ============================================================================
-   STEERADAR STYLESHEET (v8.0) - Enhanced UI/UX + Trip Management + Map Fix
+   STEERADAR STYLESHEET (v9.2) - With map dark filter + log viewer
    ============================================================================ */
 
 /* ============================ 1. CSS VARIABLES ============================ */
@@ -9,41 +9,41 @@
     --bg-card: #1a1a1a;
     --bg-card-hover: #252525;
     --bg-glass: rgba(26, 26, 26, 0.75);
-    
+
     --primary: #00d4a0;
     --primary-hover: #00b88a;
     --primary-glow: rgba(0, 212, 160, 0.35);
     --primary-subtle: rgba(0, 212, 160, 0.12);
-    
+
     --text-main: #ffffff;
     --text-sub: #a0a0a0;
     --text-muted: #666;
     --text-darker: #444;
-    
+
     --danger: #ff4d4d;
     --danger-subtle: rgba(255, 77, 77, 0.12);
     --warning: #ffc107;
     --warning-subtle: rgba(255, 193, 7, 0.12);
     --info: #4F46E5;
-    
+
     --border-color: #2a2a2a;
     --border-subtle: #1f1f1f;
-    
+
     --radius-xl: 20px;
     --radius-lg: 16px;
     --radius-md: 12px;
     --radius-sm: 8px;
     --radius-pill: 999px;
-    
+
     --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
     --shadow-glow: 0 0 20px var(--primary-glow);
-    
+
     --transition-fast: 0.15s ease;
     --transition-base: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-bounce: 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-    
+
     --safe-top: env(safe-area-inset-top, 0px);
     --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -198,15 +198,44 @@ body::before {
 #main-header > * { pointer-events: auto; }
 
 .logo-text {
-    font-size: 20px;
-    font-weight: 800;
-    color: var(--primary);
     display: flex;
     align-items: center;
-    gap: 8px;
-    letter-spacing: -0.5px;
+    gap: 10px;
+    max-width: 160px;
+    overflow: hidden;
+    flex-shrink: 0;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    transition: transform var(--transition-bounce);
 }
-.logo-text img { height: 30px; width: auto; }
+
+.logo-text:active { transform: scale(0.96); }
+
+.brand-logo {
+    height: 36px !important;
+    width: auto !important;
+    max-width: 140px !important;
+    object-fit: contain !important;
+    filter: drop-shadow(0 0 8px rgba(0, 212, 160, 0.4));
+    pointer-events: none;
+}
+
+.brand-fallback {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--primary);
+    align-items: center;
+    gap: 6px;
+    letter-spacing: -0.5px;
+    white-space: nowrap;
+}
+
+@media (max-width: 380px) {
+    .brand-logo { height: 32px !important; max-width: 120px !important; }
+    .brand-fallback { font-size: 16px; }
+}
 
 .header-actions { display: flex; align-items: center; gap: 12px; }
 
@@ -620,7 +649,6 @@ main::-webkit-scrollbar { display: none; }
 .post-action i { font-size: 15px; }
 
 /* ============================ 9. MAP VIEW (FIXED) ============================ */
-/* Map view takes full viewport, ignores main padding */
 #view-map.view-section {
     padding: 0 !important;
     position: fixed;
@@ -635,28 +663,38 @@ main::-webkit-scrollbar { display: none; }
     animation: none;
 }
 
-#view-map.view-section.active {
-    display: block;
-}
+#view-map.view-section.active { display: block; }
 
 #map-container {
     position: absolute;
-    top: 0;
-    left: 0;
+    top: 0; left: 0;
     width: 100%;
     height: 100%;
     overflow: hidden;
-}
-
-#map {
-    width: 100%;
-    height: 100%;
-    z-index: 1;
     background: var(--bg-dark);
 }
 
-/* Leaflet dark theme overrides */
-.leaflet-container { background: var(--bg-dark) !important; }
+#map {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 400px;
+    background: var(--bg-dark);
+    z-index: 1;
+}
+
+/* ============================================================
+   FIX: Dark map via CSS filter (works with OpenStreetMap tiles)
+   No API key required. Filters tile-pane only.
+   ============================================================ */
+.leaflet-tile-pane {
+    filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(1.05) saturate(0.7);
+}
+
+.leaflet-container {
+    background: #0a0a0a !important;
+    font-family: inherit !important;
+}
+
 .leaflet-control-zoom {
     margin-top: 80px !important;
     margin-bottom: 100px !important;
@@ -669,19 +707,28 @@ main::-webkit-scrollbar { display: none; }
     height: 40px !important;
     line-height: 40px !important;
     font-size: 20px !important;
+    transition: all 0.2s ease !important;
 }
-.leaflet-control-zoom a:hover { background: var(--bg-card-hover) !important; }
+.leaflet-control-zoom a:hover {
+    background: var(--bg-card-hover) !important;
+    color: var(--primary) !important;
+}
+
 .leaflet-popup-content-wrapper {
     background: var(--bg-card) !important;
     color: var(--text-main) !important;
     border-radius: var(--radius-md) !important;
     box-shadow: var(--shadow-lg) !important;
+    border: 1px solid var(--border-color) !important;
+}
+.leaflet-popup-tip {
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-color) !important;
 }
 .leaflet-popup-content { margin: 12px 14px !important; }
-.leaflet-popup-tip { background: var(--bg-card) !important; }
 .leaflet-popup-close-button {
     color: var(--text-sub) !important;
-    padding: 6px !important;
+    padding: 8px !important;
 }
 
 .map-overlay-controls {
@@ -698,7 +745,6 @@ main::-webkit-scrollbar { display: none; }
     bottom: calc(180px + var(--safe-bottom)) !important;
 }
 
-/* Custom markers */
 .custom-saved-marker, .custom-alert-icon, .custom-vehicle-marker {
     background: transparent;
     border: none;
@@ -1097,7 +1143,7 @@ input[type="file"].form-input::file-selector-button {
 }
 .empty-state i { font-size: 40px; display: block; margin-bottom: 12px; opacity: 0.3; }
 
-/* ============================ 15. TRIP MANAGEMENT ============================ */
+/* ============================ 15. TRIPS ============================ */
 .trip-card {
     background: var(--bg-card);
     border-radius: var(--radius-md);
@@ -1158,7 +1204,64 @@ input[type="file"].form-input::file-selector-button {
 }
 #trip-btn.active i { transform: scale(1.1); }
 
-/* ============================ 16. ANIMATIONS ============================ */
+/* ============================ 16. LOG VIEWER ============================ */
+.log-modal-content {
+    max-height: 85vh !important;
+    display: flex;
+    flex-direction: column;
+}
+
+.log-content {
+    flex: 1;
+    background: #050505;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    overflow-y: auto;
+    max-height: 55vh;
+    font-family: 'SF Mono', 'Courier New', Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.6;
+    margin-bottom: 12px;
+}
+
+.log-line {
+    display: flex;
+    gap: 8px;
+    padding: 3px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    word-break: break-word;
+}
+.log-time {
+    color: #4a5568;
+    flex-shrink: 0;
+    font-weight: 500;
+}
+.log-msg {
+    flex: 1;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.log-error .log-msg { color: #ff6b6b; }
+.log-warn .log-msg { color: #ffc107; }
+.log-info .log-msg { color: #a0a0a0; }
+
+.log-empty {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 30px 10px;
+    font-size: 13px;
+    font-style: italic;
+}
+
+.log-actions {
+    display: flex;
+    gap: 10px;
+    padding-top: 4px;
+}
+.log-actions .btn { flex: 1; }
+
+/* ============================ 17. ANIMATIONS ============================ */
 @keyframes pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.7; transform: scale(1.05); }
@@ -1177,7 +1280,7 @@ input[type="file"].form-input::file-selector-button {
 .stagger > *:nth-child(4) { animation-delay: 0.14s; }
 .stagger > *:nth-child(5) { animation-delay: 0.18s; }
 
-/* ============================ 17. ACCESSIBILITY ============================ */
+/* ============================ 18. ACCESSIBILITY ============================ */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
         animation-duration: 0.01ms !important;
@@ -1194,7 +1297,7 @@ a:focus-visible {
     outline-offset: 2px;
 }
 
-/* ============================ 18. RESPONSIVE ============================ */
+/* ============================ 19. RESPONSIVE ============================ */
 @media (min-width: 768px) {
     .modal-content {
         max-width: 480px;
@@ -1213,92 +1316,4 @@ a:focus-visible {
     .section-header, .hive-header, .profile-header { max-width: 600px; margin-left: auto; margin-right: auto; }
     .stories-container { max-width: 600px; margin-left: auto; margin-right: auto; }
     #trips-list { max-width: 600px; margin-left: auto; margin-right: auto; }
-}
-
-/* ============================================================
-   FIX 1: Constrain Logo Size
-   ============================================================ */
-.logo-text {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    max-width: 160px;
-    overflow: hidden;
-    flex-shrink: 0;
-    cursor: pointer;
-}
-
-.brand-logo {
-    height: 40px !important;
-    width: auto !important;
-    max-width: 160px !important;
-    object-fit: contain !important;
-    filter: drop-shadow(0 0 8px rgba(0, 212, 160, 0.4));
-}
-
-.brand-fallback {
-    font-size: 18px;
-    font-weight: 800;
-    color: var(--primary);
-    align-items: center;
-    gap: 6px;
-    letter-spacing: -0.5px;
-    white-space: nowrap;
-}
-
-/* On very small screens, shrink further */
-@media (max-width: 380px) {
-    .brand-logo { height: 32px !important; max-width: 120px !important; }
-    .brand-fallback { font-size: 16px; }
-}
-
-/* ============================================================
-   FIX 2: Make the Map Full-Screen and Visible
-   ============================================================ */
-#view-map.view-section {
-    padding: 0 !important;
-    position: fixed !important;
-    top: 0; left: 0; right: 0; bottom: 0;
-    width: 100vw !important;
-    height: 100vh !important;
-    height: 100dvh !important;
-    z-index: 50;
-    background: var(--bg-dark);
-    animation: none;
-    display: none;
-}
-
-#view-map.view-section.active {
-    display: block !important;
-}
-
-#map-container {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100% !important;
-    height: 100% !important;
-    overflow: hidden;
-}
-
-#map {
-    width: 100% !important;
-    height: 100% !important;
-    min-height: 400px;
-    background: var(--bg-dark);
-    z-index: 1;
-}
-
-/* Push map controls above bottom nav */
-.map-overlay-controls {
-    position: absolute;
-    bottom: calc(110px + var(--safe-bottom)) !important;
-    right: 20px;
-    z-index: 10;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-#trip-controls {
-    bottom: calc(180px + var(--safe-bottom)) !important;
 }
