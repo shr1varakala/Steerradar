@@ -55,7 +55,7 @@
 
         <!-- MAIN VIEWS -->
         <main>
-            <!-- 1. LANES VIEW (Live Drivers) -->
+            <!-- 1. LANES VIEW -->
             <section id="view-lanes" class="view-section active">
                 <div class="section-header flex justify-between align-center">
                     <div>
@@ -66,17 +66,15 @@
                         <i class="fas fa-filter"></i> All Lanes
                     </button>
                 </div>
-                <!-- Lane cards injected by app.js -->
             </section>
 
-            <!-- 2. HIVE VIEW (Community Feed) -->
+            <!-- 2. HIVE VIEW -->
             <section id="view-hive" class="view-section">
                 <div class="hive-header">
                     <h2 class="hive-title">Hive</h2>
                     <p class="text-sub">Your community. All aboard.</p>
                 </div>
 
-                <!-- Stories -->
                 <div class="stories-container">
                     <div class="story-item">
                         <div class="story-avatar story-add"><i class="fas fa-plus"></i></div>
@@ -100,7 +98,6 @@
                     </div>
                 </div>
 
-                <!-- Greeting Card -->
                 <div class="post-card greeting-card">
                     <div class="flex justify-between align-center">
                         <div>
@@ -112,7 +109,6 @@
                     </div>
                 </div>
 
-                <!-- Neighborhood Chat Button -->
                 <button class="btn btn-secondary w-full mb-3" 
                         onclick="openNeighborhoodChat()" 
                         style="border-color: var(--primary); justify-content: flex-start; padding: 14px 18px;">
@@ -125,7 +121,6 @@
                 </button>
 
                 <h3 class="section-subtitle">Local posts</h3>
-                <!-- Hive posts injected by app.js -->
             </section>
 
             <!-- 3. MAP VIEW -->
@@ -133,7 +128,6 @@
                 <div id="map-container">
                     <div id="map"></div>
                     
-                    <!-- SteerAgent Map Controls -->
                     <div id="steer-agent-controls" class="map-overlay-controls hidden">
                         <button class="btn-primary btn-circle" onclick="openModal('report-modal')" title="Report Alert">
                             <i class="fas fa-exclamation-triangle"></i>
@@ -146,7 +140,6 @@
                         </button>
                     </div>
 
-                    <!-- Trip Controls (SteerAgent Only) -->
                     <div id="trip-controls" class="map-overlay-controls hidden">
                         <button id="trip-btn" class="btn-primary btn-circle" onclick="toggleTrip()" title="Start/End Trip">
                             <i class="fas fa-play"></i>
@@ -166,20 +159,17 @@
                     </button>
                 </div>
 
-                <!-- SteerAgent Upgrade Section -->
                 <div id="become-steer-agent-section" class="post-card upgrade-card hidden">
                     <h3 class="upgrade-title">Become a SteerAgent</h3>
                     <p class="text-sub mb-3">Verify your documents to unlock driving features, post lanes, and accept payments.</p>
                     <button class="btn btn-primary w-full" onclick="openModal('steer-agent-modal')">Apply Now</button>
                 </div>
 
-                <!-- Pending Status -->
                 <div id="steer-agent-pending-section" class="post-card pending-card hidden">
                     <h3 class="pending-title">Application Under Review</h3>
                     <p class="text-sub text-white">Your documents are being validated by an Admin. Check your email for updates.</p>
                 </div>
 
-                <!-- Settings -->
                 <div class="post-card">
                     <h3 class="section-subtitle">Preferences</h3>
                     <div class="setting-row">
@@ -196,7 +186,6 @@
                     </div>
                 </div>
 
-                <!-- Trip History Button -->
                 <button class="btn btn-secondary w-full mt-3" onclick="openModal('trips-modal')">
                     <i class="fas fa-route"></i> My Trips
                 </button>
@@ -251,7 +240,7 @@
             <form id="signin-form">
                 <div class="form-group">
                     <label>Phone or Email</label>
-                    <input type="text" id="signin-identity" class="form-input" required placeholder="Enter phone or email">
+                    <input type="text" id="signin-identity" class="form-input" required placeholder="9876543210 or you@example.com">
                 </div>
                 <div class="form-group">
                     <label>Password</label>
