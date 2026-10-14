@@ -127,10 +127,10 @@
                 <!-- SEARCH RESULTS DROPDOWN -->
                 <div id="map-search-results" class="map-search-results hidden"></div>
 
-                <!-- TOP-RIGHT: LOCATE CONTROLS (Combined into ONE button) -->
+                <!-- TOP-RIGHT: LOCATE CONTROLS (UPDATED: Single unified button) -->
                 <div class="map-top-right">
                     <button class="map-ctrl-btn" onclick="mapModule.locateUser(true)" title="My location">
-                        <i class="fas fa-location-arrow"></i>
+                        <i class="fas fa-crosshairs"></i>
                     </button>
                 </div>
 
@@ -254,16 +254,14 @@
         <button onclick="switchTab('profile')" id="nav-profile"><i class="fas fa-user"></i> Profile</button>
     </nav>
 
-    <!-- ================= CHAT OVERLAY (With Avatar) ================= -->
+    <!-- ================= CHAT OVERLAY (UPDATED: Header Avatar added) ================= -->
     <div id="hive-chat-view" class="hidden">
         <header class="chat-header">
             <button onclick="closeChat()" class="icon-btn"><i class="fas fa-arrow-left"></i></button>
             <img id="chat-header-avatar" src="https://i.pravatar.cc/150?img=12" alt="Avatar" class="user-avatar" style="width: 32px; height: 32px; margin-right: 8px;">
             <h3 id="chat-room-title" class="chat-title">Hive Chat</h3>
         </header>
-        <div id="chat-messages-container" class="chat-container">
-            <!-- Messages will be injected here by JS with avatars -->
-        </div>
+        <div id="chat-messages-container" class="chat-container"></div>
         <div class="chat-input-area">
             <button id="request-payment-btn" class="btn-primary btn-circle btn-sm"><i class="fas fa-rupee-sign"></i></button>
             <input type="text" id="chat-input" placeholder="Type a message..." class="chat-input">
@@ -276,7 +274,6 @@
 <div id="map-bottom-sheet" class="bottom-sheet-overlay hidden" onclick="closeBottomSheet(event)">
     <div class="bottom-sheet" onclick="event.stopPropagation()">
         <div class="bottom-sheet-handle" onclick="closeBottomSheet()"></div>
-        <!-- Content is injected dynamically by showLaneDetails() in JS -->
         <div id="bottom-sheet-content" class="bottom-sheet-content"></div>
     </div>
 </div>
@@ -338,7 +335,7 @@
     </div>
 </div>
 
-<!-- 4. Create Lane (Added Departure Time) -->
+<!-- 4. Create Lane (UPDATED: Added Departure Time) -->
 <div id="create-lane-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header"><h2 class="modal-title">Create a Lane</h2><button onclick="closeModal('create-lane-modal')" class="close-btn">&times;</button></div>
@@ -443,7 +440,7 @@
     </div>
 </div>
 
-<!-- ================= NEW: AGENT PROFILE MODAL ================= -->
+<!-- ================= NEW: 12. AGENT PROFILE MODAL ================= -->
 <div id="agent-profile-modal" class="modal-overlay hidden">
     <div class="modal-content" style="max-height: 90vh; overflow-y: auto;">
         <div class="modal-header">
@@ -486,7 +483,7 @@
     </div>
 </div>
 
-<!-- ================= NEW: NEGOTIATION MODAL (- digit +) ================= -->
+<!-- ================= NEW: 13. NEGOTIATION MODAL (- digit +) ================= -->
 <div id="negotiation-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header">
@@ -517,7 +514,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module" src="js/app.js"></script>
 <script type="module" src="js/map-ui.js"></script>
-<!-- Make sure to add the new JS functions from the previous message to app.js or a new file -->
+<!-- NEW: Add this script file for the new feature logic -->
 <script type="module" src="js/features.js"></script>
 
 <script>
