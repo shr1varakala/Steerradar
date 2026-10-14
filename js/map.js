@@ -1,10 +1,13 @@
 /**
  * ============================================================================
- * STEERADAR MAP MODULE (v12.0)
+ * STEERADAR MAP MODULE (v13.0 — merged with map-ui.js)
  * ============================================================================
- * New in v12.0:
+ * Features:
  *  - Road routing via OSRM (keyless, road-following polyline + ETA)
  *  - Multi-theme map support (bright/dark/satellite/terrain)
+ *  - Pulsing agent pins (tap → features.js showLaneDetails → bottom sheet)
+ *  - Real vehicle markers from API (same pulsing pin style)
+ *  - Alerts, trip polylines, pickup routes, saved pins, search
  * ============================================================================
  */
 
@@ -38,6 +41,74 @@ const MAP_THEMES = {
     }
 };
 
+// ============ MOCK AGENTS (for demo/testing) ============
+// Real agents come from api.activeVehicles() → mapModule.renderVehicles()
+const MOCK_AGENTS = [
+    {
+        id: 'agent-1',
+        name: 'Agent A',
+        avatar: 'https://i.pravatar.cc/150?img=5',
+        rating: 4.8,
+        route: 'Koramangala to Jayanagar',
+        startTime: '10:30 AM',
+        occupancy: 41,
+        baseFare: 10,
+        distance: 5,
+        perKm: 1,
+        totalFare: 15,
+        vehicleModel: 'Honda Activa',
+        vehicleColor: 'Grey',
+        licensePlate: 'KA-05-XY-9876',
+        lat: 12.9352,
+        lng: 77.6245,
+        isLive: true,
+        hasSeats: true,
+        vehicleIcon: '🚗'
+    },
+    {
+        id: 'agent-2',
+        name: 'Agent B',
+        avatar: 'https://i.pravatar.cc/150?img=12',
+        rating: 4.9,
+        route: 'Koramangala to Indiranagar via 12th Main',
+        startTime: '10:45 AM',
+        occupancy: 78,
+        baseFare: 10,
+        distance: 5,
+        perKm: 2,
+        totalFare: 20,
+        vehicleModel: 'Maruti Suzuki Ertiga',
+        vehicleColor: 'White',
+        licensePlate: 'KA-01-AB-1234',
+        lat: 12.9784,
+        lng: 77.6408,
+        isLive: true,
+        hasSeats: true,
+        vehicleIcon: '🚗'
+    },
+    {
+        id: 'agent-3',
+        name: 'Agent C',
+        avatar: 'https://i.pravatar.cc/150?img=8',
+        rating: 4.7,
+        route: 'Koramangala to Whitefield',
+        startTime: '11:00 AM',
+        occupancy: 90,
+        baseFare: 15,
+        distance: 10,
+        perKm: 1,
+        totalFare: 25,
+        vehicleModel: 'Toyota Innova',
+        vehicleColor: 'Silver',
+        licensePlate: 'KA-03-CD-5678',
+        lat: 12.9698,
+        lng: 77.7500,
+        isLive: true,
+        hasSeats: false,
+        vehicleIcon: '🚗'
+    }
+];
+
 // ============ MODULE STATE ============
 let map = null;
 let tileLayer = null;
@@ -61,6 +132,9 @@ let searchMarker = null;
 let mapInitialized = false;
 let liveLocationWatchId = null;
 let onMessageAgent = null;
+
+// Agent (pulsing pin) state
+let agentMarkers = [];
 
 // ============ HELPERS ============
 function ensureMap() {
@@ -107,6 +181,25 @@ function escapeHTML(str) {
         .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
+/**
+ * Build the pulsing pin HTML used for both agents and real vehicles.
+ * Matches the .custom-map-pin styles in style.css
+ */
+function buildPulsingPinHTML(agent) {
+    const icon = agent.vehicleIcon || '🚗';
+    const label = agent.startTime || 'Now';
+    return `
+        <div class="custom-map-pin" data-agent-id="${escapeHTML(agent.id || '')}">
+            <div class="pin-pulse"></div>
+            <div class="pin-icon">${icon}</div>
+            <div class="pin-label">
+                <i class="fas fa-clock" style="color: var(--primary);"></i>
+                ${escapeHTML(label)}
+            </div>
+        </div>
+    `;
+}
+
 // ============================================================================
 // EXPORTED MODULE
 // ============================================================================
@@ -141,7 +234,6 @@ export const mapModule = {
                 preferCanvas: true
             }).setView([lat, lng], zoom);
 
-            // Add initial tile layer
             mapModule.setMapTheme(currentTheme);
 
             L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -151,6 +243,9 @@ export const mapModule = {
                     onMapClick(e.latlng.lat, e.latlng.lng);
                 }
             });
+
+            // Hide search results when user drags
+            map.on('dragstart', () => mapModule.hideSearchResults());
 
             setTimeout(() => map.invalidateSize(), 100);
             setTimeout(() => map.invalidateSize(), 500);
@@ -171,22 +266,16 @@ export const mapModule = {
     // ========================================================================
     // MAP THEMES
     // ========================================================================
-    /**
-     * Change the map theme. Options: bright, dark, satellite, terrain.
-     * Saved to localStorage.
-     */
     setMapTheme: (themeName) => {
         if (!map) return;
         const theme = MAP_THEMES[themeName] || MAP_THEMES.bright;
         currentTheme = themeName;
 
-        // Remove existing tile layer
         if (tileLayer) {
             map.removeLayer(tileLayer);
             tileLayer = null;
         }
 
-        // Add new tile layer
         const opts = {
             attribution: theme.attr,
             maxZoom: 19
@@ -196,14 +285,12 @@ export const mapModule = {
         tileLayer = L.tileLayer(theme.url, opts);
         tileLayer.addTo(map);
 
-        // Apply CSS filter to the tile pane (for dark mode)
         const pane = map.getContainer().querySelector('.leaflet-tile-pane');
         if (pane) {
             pane.style.filter = theme.filter || 'none';
             pane.style.transition = 'filter 0.3s ease';
         }
 
-        // Change container background based on theme
         const container = map.getContainer();
         container.style.background = themeName === 'dark' ? '#0a0a0a' : '#e5e3df';
 
@@ -215,12 +302,8 @@ export const mapModule = {
     getMapTheme: () => currentTheme,
 
     // ========================================================================
-    // ROAD ROUTING (OSRM — keyless, road-following)
+    // ROAD ROUTING (OSRM)
     // ========================================================================
-    /**
-     * Fetch a road-following route between two points using OSRM.
-     * Returns { distance (km), duration (min), coords ([[lat,lng],...]) }
-     */
     fetchRoadRoute: async (fromLat, fromLng, toLat, toLng) => {
         const url = `https://router.project-osrm.org/route/v1/driving/` +
             `${fromLng},${fromLat};${toLng},${toLat}` +
@@ -237,9 +320,9 @@ export const mapModule = {
             const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
 
             return {
-                distance: route.distance / 1000,       // km
-                duration: route.duration / 60,         // minutes
-                coords: coords                          // [[lat,lng], ...]
+                distance: route.distance / 1000,
+                duration: route.duration / 60,
+                coords: coords
             };
         } catch (err) {
             console.warn('[map] OSRM routing failed:', err.message);
@@ -247,21 +330,14 @@ export const mapModule = {
         }
     },
 
-    /**
-     * Draw a road-following route on the map with a nice blue polyline + ETA badge.
-     * This is what your screenshot shows.
-     */
     showRoadRoute: async (fromLat, fromLng, toLat, toLng, options = {}) => {
         if (!ensureMap()) return null;
 
-        // Clear any previous navigation
         mapModule.clearRoadRoute();
 
-        // Fetch the route from OSRM
         const route = await mapModule.fetchRoadRoute(fromLat, fromLng, toLat, toLng);
 
         if (!route) {
-            // Fallback: straight dashed line if OSRM fails
             console.warn('[map] Falling back to straight line');
             navigationLine = L.polyline(
                 [[fromLat, fromLng], [toLat, toLng]],
@@ -270,12 +346,10 @@ export const mapModule = {
             return null;
         }
 
-        // Draw glow layer
         navigationGlow = L.polyline(route.coords, {
             color: '#4F46E5', weight: 12, opacity: 0.15, lineCap: 'round'
         }).addTo(map);
 
-        // Draw main route line (like Google Maps blue)
         navigationLine = L.polyline(route.coords, {
             color: '#4F46E5',
             weight: 6,
@@ -284,7 +358,6 @@ export const mapModule = {
             lineJoin: 'round'
         }).addTo(map);
 
-        // Origin marker (gray dot)
         const originMarker = L.marker([fromLat, fromLng], {
             icon: customIcon(`
                 <div style="
@@ -298,7 +371,6 @@ export const mapModule = {
         }).addTo(map);
         routeMarkers.push(originMarker);
 
-        // Destination marker (red pin)
         const destMarker = L.marker([toLat, toLng], {
             icon: customIcon(`
                 <div style="
@@ -316,7 +388,6 @@ export const mapModule = {
         }).addTo(map);
         routeMarkers.push(destMarker);
 
-        // ETA badge in the middle of the route
         const midIdx = Math.floor(route.coords.length / 2);
         const mid = route.coords[midIdx];
 
@@ -348,10 +419,8 @@ export const mapModule = {
         }).addTo(map);
         routeMarkers.push(etaBadge);
 
-        // Fit bounds
         map.fitBounds(navigationLine.getBounds(), { padding: [70, 70] });
 
-        // Dispatch event for app.js to show info
         window.dispatchEvent(new CustomEvent('routeCalculated', {
             detail: {
                 distance: route.distance,
@@ -372,7 +441,7 @@ export const mapModule = {
     },
 
     // ========================================================================
-    // SEARCH (Nominatim — free, no key)
+    // SEARCH (Nominatim)
     // ========================================================================
     wireSearch: () => {
         const input = document.getElementById('map-search-input');
@@ -593,6 +662,63 @@ export const mapModule = {
     },
 
     // ========================================================================
+    // AGENTS (Pulsing Pins — new, from map-ui.js)
+    // ========================================================================
+
+    /**
+     * Render agent markers with pulsing pin design.
+     * Tap → window.showLaneDetails(agent) → bottom sheet (features.js)
+     */
+    renderAgents: (agents = MOCK_AGENTS) => {
+        if (!ensureMap() || !Array.isArray(agents)) return;
+        mapModule.clearAgents();
+
+        agents.forEach(agent => {
+            if (!agent.lat || !agent.lng) return;
+
+            const iconHtml = buildPulsingPinHTML(agent);
+            const customIconObj = L.divIcon({
+                html: iconHtml,
+                className: 'custom-div-icon',
+                iconSize: [60, 70],
+                iconAnchor: [30, 60]
+            });
+
+            const marker = L.marker([agent.lat, agent.lng], {
+                icon: customIconObj,
+                riseOnHover: true
+            }).addTo(map);
+
+            marker.on('click', (e) => {
+                L.DomEvent.stopPropagation(e);
+                if (typeof window.showLaneDetails === 'function') {
+                    window.showLaneDetails(agent);
+                } else {
+                    console.warn('[map] showLaneDetails not found. Is features.js loaded?');
+                }
+            });
+
+            // Hover scale effect
+            marker.on('mouseover', function() {
+                const el = this.getElement()?.querySelector('.custom-map-pin');
+                if (el) el.style.transform = 'scale(1.08)';
+            });
+            marker.on('mouseout', function() {
+                const el = this.getElement()?.querySelector('.custom-map-pin');
+                if (el) el.style.transform = 'scale(1)';
+            });
+
+            agentMarkers.push(marker);
+        });
+    },
+
+    clearAgents: () => {
+        if (!map) return;
+        agentMarkers.forEach(m => { if (map.hasLayer(m)) map.removeLayer(m); });
+        agentMarkers = [];
+    },
+
+    // ========================================================================
     // ALERTS
     // ========================================================================
     addAlertMarker: (lat, lng, type) => {
@@ -625,7 +751,7 @@ export const mapModule = {
     },
 
     // ========================================================================
-    // VEHICLE MARKERS
+    // VEHICLE MARKERS (Real data from API — uses pulsing pins too)
     // ========================================================================
     renderVehicles: (vehicles = [], myLocation = null) => {
         if (!ensureMap() || !Array.isArray(vehicles)) return;
@@ -638,6 +764,39 @@ export const mapModule = {
             const isMine = v.mine;
             const color = isMine ? '#00b88a' : '#4F46E5';
 
+            // Build an agent-like object for the bottom sheet
+            const agentData = {
+                id: v.id || v.phone,
+                name: v.ownerName || v.name || 'SteerAgent',
+                avatar: v.photo || 'https://i.pravatar.cc/150?img=12',
+                rating: v.rating || 4.8,
+                route: v.route || v.description || 'On the road',
+                startTime: v.startTime || 'Now',
+                occupancy: v.occupancy || 60,
+                baseFare: v.baseFare || 10,
+                distance: v.distance || 5,
+                perKm: v.perKm || 2,
+                totalFare: v.totalFare || (10 + 5 * 2),
+                vehicleModel: v.vehicleModel || 'Vehicle',
+                vehicleColor: v.vehicleColor || '—',
+                licensePlate: v.vehicle || 'N/A',
+                vehicleIcon: '🚗'
+            };
+
+            const iconHtml = buildPulsingPinHTML(agentData);
+            const pinIcon = L.divIcon({
+                html: iconHtml,
+                className: 'custom-div-icon',
+                iconSize: [60, 70],
+                iconAnchor: [30, 60]
+            });
+
+            const marker = L.marker([v.lat, v.lng], {
+                icon: pinIcon,
+                riseOnHover: true
+            }).addTo(map);
+
+            // Build the popup (keeps old "Message / Where?" behavior)
             let distanceHTML = '';
             if (myLocation && !isMine) {
                 const km = haversine(myLocation.lat, myLocation.lng, v.lat, v.lng);
@@ -676,19 +835,16 @@ export const mapModule = {
                 </div>
             `;
 
-            const icon = customIcon(`
-                <div style="
-                    width: 38px; height: 38px; border-radius: 50%;
-                    border: 3px solid ${color}; background: #fff;
-                    display: flex; align-items: center; justify-content: center;
-                    box-shadow: 0 0 12px ${color}80; overflow: hidden;
-                "><img src="${v.photo || 'https://i.pravatar.cc/150?img=12'}"
-                    style="width:100%; height:100%; object-fit:cover;"
-                    onerror="this.src='https://i.pravatar.cc/150?img=12'"></div>
-            `, 38, [19, 19]);
-
-            const marker = L.marker([v.lat, v.lng], { icon }).addTo(map);
             marker.bindPopup(popupHTML);
+
+            // ⭐ Primary action: tap pin → bottom sheet via features.js
+            marker.on('click', (e) => {
+                L.DomEvent.stopPropagation(e);
+                if (typeof window.showLaneDetails === 'function') {
+                    window.showLaneDetails(agentData);
+                }
+            });
+
             vehicleMarkers.push(marker);
         });
     },
@@ -732,7 +888,7 @@ export const mapModule = {
     },
 
     // ========================================================================
-    // PICKUP ROUTE (agent → rider pickup)
+    // PICKUP ROUTE
     // ========================================================================
     drawPickupRoute: (fromLat, fromLng, toLat, toLng, label = 'Pickup') => {
         if (!ensureMap()) return null;
@@ -961,7 +1117,13 @@ export const mapModule = {
         mapModule.clearRoadRoute();
         mapModule.clearPickupRoute();
         mapModule.clearSearch();
-    }
+        mapModule.clearAgents();
+    },
+
+    // ========================================================================
+    // CONSTANTS (exposed for anyone who wants the demo data)
+    // ========================================================================
+    MOCK_AGENTS: MOCK_AGENTS
 };
 
-console.log('[map] Module v12.0 loaded');
+console.log('[map] Module v13.0 loaded (merged with map-ui)');
