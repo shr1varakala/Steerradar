@@ -172,7 +172,21 @@
                         </label>
                     </div>
                 </div>
-
+<div class="post-card">
+    <h3 class="section-subtitle">Map Style</h3>
+    <div class="setting-row">
+        <div>
+            <span style="font-weight:600;">Map theme</span>
+            <p class="text-sub" style="font-size:11px; margin-top:2px;">Choose how the map looks</p>
+        </div>
+    </div>
+    <select id="map-theme-select" class="form-input" onchange="handleMapThemeChange(this.value)" style="margin-top:8px;">
+        <option value="bright">☀️ Bright (Standard)</option>
+        <option value="dark">🌙 Dark</option>
+        <option value="satellite">🛰️ Satellite</option>
+        <option value="terrain">⛰️ Terrain</option>
+    </select>
+</div>
                 <div class="post-card">
                     <h3 class="section-subtitle">Preferences</h3>
                     <div class="setting-row">
