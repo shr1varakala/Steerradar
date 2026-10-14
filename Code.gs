@@ -1,21 +1,21 @@
 /**
- * Steeradar backend — v8.10 (Dedupe Lanes + Robust Uploads)
+ * Steeradar backend — v8.11 (Resilient Setup)
  * ============================================================================
- * Changes vs v8.9:
- *  - insertLane is idempotent: same id OR same route+vehicle returns the
- *    existing lane instead of appending a duplicate row.
- *  - uploadImage accepts image/jpg, image/pjpeg, image/x-png, charset params,
- *    newline-wrapped base64, URL-safe base64, and auto-restores padding.
- *  - Body limit raised to 15 MB; image payload cap 10 MB base64 (~7 MB binary).
- *  - Drive/setSharing errors surface as `upload_failed` (retryable) not 500.
- * Retains everything from v8.9:
- *  - Approved email includes vehicle/plate/selfie images (lh3 URLs)
- *  - Vehicle details & verification photos locked for active agents
- *  - Instagram-style Hive: image/video, likes, comments, share URLs
+ * v8.11 changes:
+ *  - setup() runs each step in isolation (sheet migration, trigger install,
+ *    pepper creation all wrapped separately) so one failure doesn't kill the run.
+ *  - installTriggers() is idempotent — won't duplicate or error on re-run.
+ *  - Added firstRun() helper that logs a clean checklist.
+ *  - All v8.10 features retained:
+ *      • insertLane dedupe (id + route+vehicle idempotent)
+ *      • uploadImage tolerant of many client formats, 15 MB body cap
+ *      • Approved-agent email shows vehicle/plate/selfie images
+ *      • Vehicle + verification photos locked for active agents
+ *      • Instagram-style Hive with likes + comments + share URLs
  * ============================================================================
  */
 
-const VERSION = '8.10';
+const VERSION = '8.11';
 const APP_NAME = 'Steeradar';
 const APP_URL = 'https://suryasticsai.github.io/Steeradar/';
 const LOGO_URL = 'https://raw.githubusercontent.com/suryasticsai/Steeradar/main/steerardar-logo.png';
@@ -34,7 +34,7 @@ const OTP_DAILY_CAP = 80;
 const OTP_COOLDOWN_MS = 45000;
 const LANE_TTL_MS = 24 * 3600 * 1000;
 const PRESENCE_TTL_MS = 2 * 60 * 1000;
-const MAX_BODY_CHARS = 15000000;      // raised: ~11 MB binary after base64 overhead
+const MAX_BODY_CHARS = 15000000;
 const MAX_POINTS_PER_USER = 200;
 const MAX_COMMENT_LEN = 800;
 const PW_MIN = 6;
@@ -322,7 +322,6 @@ function featureTile(emoji, title, sub) {
     + '</tr></table></td></tr></table>';
 }
 
-// Bulletproof email image tile — works in Gmail/Outlook.
 function emailPhotoTile(label, imgUrl, sub) {
   if (!imgUrl) return '';
   return '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px;">'
@@ -891,7 +890,6 @@ H.updateMe = function (b, u) {
   if (r.community !== undefined) patch.community = clean(r.community, 60);
   if (r.ghostMode !== undefined) patch.ghostMode = r.ghostMode ? 'true' : 'false';
 
-  // Avatar always editable
   if (r.photo !== undefined) {
     const url = String(r.photo || '');
     if (url === '') {
@@ -1103,12 +1101,6 @@ H.listLanes = function (b, u) {
   return out.slice(0, 300);
 };
 
-/**
- * insertLane — idempotent + semantic dedupe.
- *  1. If row.id matches an existing lane owned by this user → update that row.
- *  2. If a live lane exists with same vehicle + from + via + to → update it.
- *  3. Otherwise insert new (respecting the 5-active-lane cap).
- */
 H.insertLane = function (b, u) {
   const row = b.row || b;
   if (!isId(row.id)) row.id = shortId('L');
@@ -1118,7 +1110,7 @@ H.insertLane = function (b, u) {
   const lanes = readAll('lanes');
   const t = now();
 
-  // 1) ID collision (retry / double-submit) — update, don't append
+  // 1) ID collision — update, don't append
   for (let i = 0; i < lanes.length; i++) {
     if (lanes[i].id === row.id) {
       if (lanes[i].ownerPhone !== u.phone) {
@@ -1130,7 +1122,7 @@ H.insertLane = function (b, u) {
     }
   }
 
-  // 2) Semantic duplicate — same user, same route+vehicle, still live
+  // 2) Semantic duplicate — same vehicle + from + via + to, still live
   const normFrom = clean(row.from, 80).toLowerCase();
   const normVia  = clean(row.via, 200).toLowerCase();
   const normTo   = clean(row.to, 80).toLowerCase();
@@ -1153,7 +1145,7 @@ H.insertLane = function (b, u) {
     }
   }
 
-  // 3) Genuine new lane — check cap
+  // 3) Cap check, then append
   const mine = lanes.filter(function (l) {
     return l.ownerPhone === u.phone && t - Number(l.ts) < LANE_TTL_MS;
   });
@@ -1685,14 +1677,6 @@ function getFolder(name, parent) {
   return it.hasNext() ? it.next() : parent.createFolder(name);
 }
 
-/**
- * uploadImage — tolerant of many client formats:
- *   - data:image/<type>;base64,<payload>
- *   - data:image/<type>;charset=utf-8;base64,<payload>
- *   - raw base64 (with or without data: prefix)
- *   - URL-safe base64 (-, _), newline-wrapped, unpadded
- *   - image/jpg, image/pjpeg, image/x-png aliases
- */
 H.uploadImage = function (b, u) {
   rateLimit(['img:' + u.phone], 40, 21600);
 
@@ -1732,7 +1716,7 @@ H.uploadImage = function (b, u) {
     throw new ApiError('bad_image', 'Image data is corrupted');
   }
 
-  const MAX_B64 = 10000000; // ~7 MB binary
+  const MAX_B64 = 10000000;
   if (payload.length > MAX_B64) {
     throw new ApiError('too_large', 'Image too large (max ~7 MB)');
   }
@@ -1919,29 +1903,96 @@ function doPost(e) {
   }
 }
 
-// ==================== SETUP ====================
+// ==================== SETUP (resilient) ====================
+/**
+ * setup() — runs each step isolated. If one step fails, the rest still try,
+ * and a clear checklist is logged. Re-runnable safely.
+ */
 function setup() {
-  pepper();
-  Object.keys(SCHEMA).forEach(migrateSheet);
-  installTriggers();
+  Logger.log('=== Steeradar setup v' + VERSION + ' ===');
 
-  Logger.log('============================================');
-  Logger.log('Steeradar backend v' + VERSION + ' ready');
-  Logger.log('============================================');
-  Logger.log('Sheet URL: ' + getSS().getUrl());
-  Logger.log('Mail quota: ' + safeQuota());
-  Logger.log('Now: Deploy → New version → Anyone');
+  // 1) Pepper
+  try {
+    pepper();
+    Logger.log('✅ Pepper ensured');
+  } catch (e) {
+    Logger.log('❌ Pepper failed: ' + e);
+  }
+
+  // 2) Spreadsheet
+  try {
+    const ss = getSS();
+    Logger.log('✅ Spreadsheet ready: ' + ss.getUrl());
+  } catch (e) {
+    Logger.log('❌ Spreadsheet failed: ' + e);
+  }
+
+  // 3) Migrate each sheet
+  const names = Object.keys(SCHEMA);
+  let migrated = 0, failed = 0;
+  for (let i = 0; i < names.length; i++) {
+    try {
+      migrateSheet(names[i]);
+      migrated++;
+    } catch (e) {
+      failed++;
+      Logger.log('❌ migrateSheet(' + names[i] + '): ' + e);
+    }
+  }
+  Logger.log('✅ Sheets migrated: ' + migrated + '/' + names.length +
+             (failed ? (' (' + failed + ' failed)') : ''));
+
+  // 4) Triggers
+  try {
+    installTriggers();
+    Logger.log('✅ Daily cleanup trigger installed');
+  } catch (e) {
+    Logger.log('⚠️  Trigger install failed (non-fatal): ' + e);
+    Logger.log('    → Fix by: Run this setup once manually after authorizing.');
+  }
+
+  // 5) Mail quota
+  try {
+    Logger.log('📧 Mail quota: ' + safeQuota());
+  } catch (e) {
+    Logger.log('⚠️  Mail quota check failed: ' + e);
+  }
+
+  Logger.log('=== Setup complete ===');
+  Logger.log('Next: Deploy → New deployment → Web app → Anyone → Deploy');
+}
+
+/**
+ * firstRun — call this ONE time after pasting the code, before anything else.
+ * It authorizes every service so subsequent calls never hit "unknown error".
+ */
+function firstRun() {
+  Logger.log('Authorizing services…');
+  try { PropertiesService.getScriptProperties().getKeys(); Logger.log('✅ PropertiesService'); } catch (e) { Logger.log('❌ Properties: ' + e); }
+  try { SpreadsheetApp.getActive(); Logger.log('✅ SpreadsheetApp'); } catch (e) { Logger.log('❌ Spreadsheet: ' + e); }
+  try { DriveApp.getRootFolder().getName(); Logger.log('✅ DriveApp'); } catch (e) { Logger.log('❌ Drive: ' + e); }
+  try { MailApp.getRemainingDailyQuota(); Logger.log('✅ MailApp'); } catch (e) { Logger.log('❌ Mail: ' + e); }
+  try { ScriptApp.getProjectTriggers(); Logger.log('✅ ScriptApp'); } catch (e) { Logger.log('❌ ScriptApp: ' + e); }
+  try { CacheService.getScriptCache(); Logger.log('✅ CacheService'); } catch (e) { Logger.log('❌ Cache: ' + e); }
+  try { UrlFetchApp.getRequest('https://example.com'); Logger.log('✅ UrlFetchApp'); } catch (e) { Logger.log('❌ UrlFetch: ' + e); }
+  Logger.log('Done. Now run setup().');
 }
 
 function installTriggers() {
-  const triggers = ScriptApp.getProjectTriggers();
-  for (let i = 0; i < triggers.length; i++) {
-    if (triggers[i].getHandlerFunction() === 'cleanup') {
-      ScriptApp.deleteTrigger(triggers[i]);
+  // Remove any existing cleanup trigger first (idempotent)
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    for (let i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'cleanup') {
+        try { ScriptApp.deleteTrigger(triggers[i]); } catch (e) {}
+      }
     }
+  } catch (e) {
+    Logger.log('Could not list triggers: ' + e);
+    throw e;
   }
+
   ScriptApp.newTrigger('cleanup').timeBased().everyDays(1).atHour(3).create();
-  Logger.log('Daily cleanup installed.');
 }
 
 function cleanup() {
@@ -1964,6 +2015,10 @@ function cleanup() {
     prune('comments', function (c) { return t - Number(c.ts) < 180 * 86400000; });
     Logger.log('Cleanup complete.');
   });
+}
+
+function showUrl() {
+  Logger.log('Sheet URL: ' + getSS().getUrl());
 }
 
 // ==================== TEST HELPERS ====================
