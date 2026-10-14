@@ -127,7 +127,7 @@
                 <!-- SEARCH RESULTS DROPDOWN -->
                 <div id="map-search-results" class="map-search-results hidden"></div>
 
-                <!-- TOP-RIGHT: LOCATE CONTROLS (UPDATED: Single unified button) -->
+                <!-- TOP-RIGHT: LOCATE (single button — no duplicates) -->
                 <div class="map-top-right">
                     <button class="map-ctrl-btn" onclick="mapModule.locateUser(true)" title="My location">
                         <i class="fas fa-crosshairs"></i>
@@ -254,7 +254,7 @@
         <button onclick="switchTab('profile')" id="nav-profile"><i class="fas fa-user"></i> Profile</button>
     </nav>
 
-    <!-- ================= CHAT OVERLAY (UPDATED: Header Avatar added) ================= -->
+    <!-- ================= CHAT OVERLAY (with header avatar) ================= -->
     <div id="hive-chat-view" class="hidden">
         <header class="chat-header">
             <button onclick="closeChat()" class="icon-btn"><i class="fas fa-arrow-left"></i></button>
@@ -335,7 +335,7 @@
     </div>
 </div>
 
-<!-- 4. Create Lane (UPDATED: Added Departure Time) -->
+<!-- 4. Create Lane (with departure time) -->
 <div id="create-lane-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header"><h2 class="modal-title">Create a Lane</h2><button onclick="closeModal('create-lane-modal')" class="close-btn">&times;</button></div>
@@ -346,7 +346,6 @@
             <div class="form-group"><label>Vehicle Type</label><select id="lane-vehicle-type" class="form-input" required>
                 <option value="car">Car</option><option value="bike">Bike</option><option value="auto">Auto</option><option value="bus">Bus</option>
             </select></div>
-            <!-- NEW: Departure Time -->
             <div class="form-group"><label>Departure Time</label><input type="time" id="lane-start-time" class="form-input" required></div>
             <div class="form-group"><label>Vehicle Photo (Optional)</label><input type="file" id="lane-photo" class="form-input" accept="image/*"></div>
             <button type="submit" class="btn btn-primary w-full mt-4">Post Lane</button>
@@ -440,25 +439,23 @@
     </div>
 </div>
 
-<!-- ================= NEW: 12. AGENT PROFILE MODAL ================= -->
+<!-- 12. NEW: Agent Profile Modal -->
 <div id="agent-profile-modal" class="modal-overlay hidden">
-    <div class="modal-content" style="max-height: 90vh; overflow-y: auto;">
+    <div class="modal-content" style="max-height: 92vh; overflow-y: auto;">
         <div class="modal-header">
             <h2 class="modal-title">SteerAgent Profile</h2>
             <button onclick="closeModal('agent-profile-modal')" class="close-btn">&times;</button>
         </div>
-        
-        <!-- Agent Header -->
+
         <div class="flex flex-col items-center mb-4">
-            <img id="agent-profile-avatar" src="" alt="Agent" class="profile-avatar" style="width: 80px; height: 80px; border-width: 3px;">
+            <img id="agent-profile-avatar" src="https://i.pravatar.cc/150?img=12" alt="Agent" class="profile-avatar" style="width: 80px; height: 80px; border-width: 3px;">
             <h3 id="agent-profile-name" class="profile-name mt-2">Agent Name</h3>
             <div class="flex gap-2 mt-1">
                 <span class="tag tag-live" id="agent-profile-rating">⭐ 4.8 (120 Rides)</span>
-                <span class="tag tag-live" style="background: var(--success); color: white;"><i class="fas fa-shield-check"></i> Verified</span>
+                <span class="tag tag-live" style="background: var(--primary); color: #fff;"><i class="fas fa-shield-alt"></i> Verified</span>
             </div>
         </div>
 
-        <!-- Vehicle Details -->
         <div class="post-card mb-3">
             <h3 class="section-subtitle mb-2"><i class="fas fa-car"></i> Vehicle Details</h3>
             <div class="grid-2-col text-sm">
@@ -468,41 +465,40 @@
             </div>
         </div>
 
-        <!-- Application Images Gallery -->
         <div class="mb-4">
             <h3 class="section-subtitle mb-2">Vehicle & Verification Images</h3>
             <p class="text-sub text-xs mb-2">Images uploaded by the agent during application.</p>
             <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar" id="agent-images-gallery">
-                <!-- Images will be injected here by JS -->
+                <!-- Injected by features.js -->
             </div>
         </div>
 
         <button class="btn btn-primary w-full" onclick="closeModal('agent-profile-modal'); openChatFromAgentProfile();">
-            <i class="fas fa-message"></i> Message Agent
+            <i class="fas fa-comment"></i> Message Agent
         </button>
     </div>
 </div>
 
-<!-- ================= NEW: 13. NEGOTIATION MODAL (- digit +) ================= -->
+<!-- 13. NEW: Negotiation Modal (- digit +) -->
 <div id="negotiation-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header">
             <h2 class="modal-title">Negotiate Fare</h2>
             <button onclick="closeModal('negotiation-modal')" class="close-btn">&times;</button>
         </div>
-        
+
         <div class="text-center mb-4">
             <p class="text-sub text-sm mb-1">Standard Fare</p>
-            <p class="text-2xl font-bold text-gray-400 line-through" id="neg-standard-fare">₹20</p>
+            <p class="text-2xl font-bold text-darker line-through" id="neg-standard-fare">₹20</p>
         </div>
 
         <div class="flex items-center justify-center gap-4 mb-6">
-            <button onclick="updateOffer(-1)" class="btn btn-secondary btn-circle" style="width: 50px; height: 50px; font-size: 20px;">-</button>
+            <button onclick="updateOffer(-1)" class="btn btn-secondary btn-circle" style="width: 52px; height: 52px; font-size: 22px;">-</button>
             <div class="text-center">
                 <p class="text-sub text-xs mb-1">Your Offer</p>
                 <p class="text-3xl font-bold" style="color: var(--primary);" id="neg-offer-display">₹18</p>
             </div>
-            <button onclick="updateOffer(1)" class="btn btn-secondary btn-circle" style="width: 50px; height: 50px; font-size: 20px;">+</button>
+            <button onclick="updateOffer(1)" class="btn btn-secondary btn-circle" style="width: 52px; height: 52px; font-size: 22px;">+</button>
         </div>
 
         <button class="btn btn-primary w-full" onclick="sendOffer()">Send Offer to Agent</button>
@@ -513,9 +509,8 @@
 <script src="config.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module" src="js/app.js"></script>
-<script type="module" src="js/map-ui.js"></script>
-<!-- NEW: Add this script file for the new feature logic -->
 <script type="module" src="js/features.js"></script>
+<!-- NOTE: map.js is auto-loaded via `import` inside app.js — no separate tag needed -->
 
 <script>
     // Unregister any old service workers
