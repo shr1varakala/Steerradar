@@ -1,338 +1,435 @@
-/**
- * ============================================================================
- * js/map-ui.js — Map UI Enhancements (v2.0)
- * ============================================================================
- * - Bottom sheet that slides up when a map marker is tapped
- * - Convenience builders for pin / vehicle / lane bottom sheets
- * - Hooks into map.js marker taps
- *
- * Depends on globals from app.js (state, mapModule, openModal, etc.)
- * ============================================================================
- */
+// ============================================================
+// STEERRADAR MAP UI MODULE (v2.0)
+// Handles: Leaflet init, custom pins, search, filters, location
+// Connects to: features.js (showLaneDetails, negotiation)
+// ============================================================
 
-// ============================================================================
-// BOTTOM SHEET — Core
-// ============================================================================
-window.openBottomSheet = function (data) {
-    const overlay = document.getElementById('map-bottom-sheet');
-    const content = document.getElementById('bottom-sheet-content');
-    if (!overlay || !content) {
-        console.warn('[map-ui] Bottom sheet container missing');
+import { logger } from './app.js'; // If you have logger in app.js
+
+// ========== 1. GLOBAL STATE ==========
+let map = null;
+let markersLayer = null;
+let routeLayer = null;
+let userLocationMarker = null;
+let currentFilter = 'live';
+let isTripActive = false;
+let isGhostMode = false;
+let searchTimeout = null;
+
+// Mock agent data - replace with real data from your backend
+const MOCK_AGENTS = [
+    {
+        id: 'agent-1',
+        name: 'Agent A',
+        avatar: 'https://i.pravatar.cc/150?img=5',
+        rating: 4.8,
+        route: 'Koramangala to Jayanagar',
+        startTime: '10:30 AM',
+        occupancy: 41,
+        baseFare: 10,
+        distance: 5,
+        perKm: 1,
+        totalFare: 15,
+        vehicleModel: 'Honda Activa',
+        vehicleColor: 'Grey',
+        licensePlate: 'KA-05-XY-9876',
+        lat: 12.9352,
+        lng: 77.6245,
+        isLive: true,
+        hasSeats: true
+    },
+    {
+        id: 'agent-2',
+        name: 'Agent B',
+        avatar: 'https://i.pravatar.cc/150?img=12',
+        rating: 4.9,
+        route: 'Koramangala to Indiranagar via 12th Main',
+        startTime: '10:45 AM',
+        occupancy: 78,
+        baseFare: 10,
+        distance: 5,
+        perKm: 2,
+        totalFare: 20,
+        vehicleModel: 'Maruti Suzuki Ertiga',
+        vehicleColor: 'White',
+        licensePlate: 'KA-01-AB-1234',
+        lat: 12.9784,
+        lng: 77.6408,
+        isLive: true,
+        hasSeats: true
+    },
+    {
+        id: 'agent-3',
+        name: 'Agent C',
+        avatar: 'https://i.pravatar.cc/150?img=8',
+        rating: 4.7,
+        route: 'Koramangala to Whitefield',
+        startTime: '11:00 AM',
+        occupancy: 90,
+        baseFare: 15,
+        distance: 10,
+        perKm: 1,
+        totalFare: 25,
+        vehicleModel: 'Toyota Innova',
+        vehicleColor: 'Silver',
+        licensePlate: 'KA-03-CD-5678',
+        lat: 12.9698,
+        lng: 77.7500,
+        isLive: true,
+        hasSeats: false
+    }
+];
+
+// ========== 2. INITIALIZE MAP ==========
+function initMap() {
+    const mapEl = document.getElementById('map');
+    if (!mapEl) {
+        console.warn('[map-ui] #map not found, skipping init.');
         return;
     }
 
-    // ---------- Media ----------
-    let mediaHTML = '';
-    if (data.image) {
-        mediaHTML = `<img class="bs-img" src="${escapeHtml(data.image)}" alt=""
-            onerror="this.onerror=null; this.style.display='none';">`;
-    }
+    // Initialize Leaflet
+    map = L.map('map', {
+        zoomControl: false,
+        attributionControl: false,
+        center: [12.9716, 77.5946], // Bangalore
+        zoom: 13,
+        preferCanvas: true
+    });
 
-    // ---------- Tags ----------
-    let tagsHTML = '';
-    if (data.tags && data.tags.length) {
-        tagsHTML = '<div class="bs-tag-row">' +
-            data.tags
-                .filter(t => t !== undefined && t !== null && String(t).trim() !== '')
-                .map(t => `<span class="tag tag-fare">${escapeHtml(String(t))}</span>`)
-                .join('') +
-            '</div>';
-    }
+    // Tile layer (OpenStreetMap)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        minZoom: 10
+    }).addTo(map);
 
-    // ---------- Info rows ----------
-    let infoRows = '';
-    if (data.info && data.info.length) {
-        infoRows = data.info
-            .filter(row => row && row.label !== undefined && row.value !== undefined && String(row.value).trim() !== '')
-            .map(row => `
-                <div class="bs-info-row">
-                    <span class="bs-info-label">${escapeHtml(row.label)}</span>
-                    <span class="bs-info-value">${escapeHtml(String(row.value))}</span>
-                </div>
-            `).join('');
-    }
+    // Layer groups
+    markersLayer = L.layerGroup().addTo(map);
+    routeLayer = L.layerGroup().addTo(map);
 
-    // ---------- Actions ----------
-    let actionsHTML = '';
-    if (data.actions && data.actions.length) {
-        actionsHTML = '<div class="bs-actions">' +
-            data.actions.map(a => `
-                <button class="btn ${a.style || 'btn-secondary'}" onclick="${a.onclick}">
-                    <i class="fas ${a.icon}"></i> ${escapeHtml(a.label)}
-                </button>
-            `).join('') +
-            '</div>';
-    }
+    // Render the agents
+    renderAgents(MOCK_AGENTS);
 
-    // ---------- Compose ----------
-    content.innerHTML = `
-        <div class="bs-header">
-            <div>
-                <div class="bs-title">${escapeHtml(data.title || 'Details')}</div>
-                ${data.subtitle ? `<div class="bs-sub">${escapeHtml(data.subtitle)}</div>` : ''}
+    // Bind search input
+    bindSearchInput();
+
+    // Detect movement to hide search results
+    map.on('dragstart', () => {
+        const results = document.getElementById('map-search-results');
+        if (results) results.classList.add('hidden');
+    });
+
+    if (logger) logger.info('[map-ui] Map initialized');
+}
+
+// ========== 3. RENDER AGENT MARKERS (Custom Pulsing Pins) ==========
+function renderAgents(agents) {
+    if (!markersLayer) return;
+    markersLayer.clearLayers();
+
+    agents.forEach(agent => {
+        // Filter logic
+        if (currentFilter === 'live' && !agent.isLive) return;
+        if (currentFilter === 'seats' && !agent.hasSeats) return;
+        if (currentFilter === 'mine') return; // TODO: filter by current user
+
+        const marker = createAgentMarker(agent);
+        markersLayer.addLayer(marker);
+    });
+}
+
+function createAgentMarker(agent) {
+    // Custom HTML for the pulsing pin
+    const iconHtml = `
+        <div class="custom-map-pin" data-agent-id="${agent.id}">
+            <div class="pin-pulse"></div>
+            <div class="pin-icon">🚗</div>
+            <div class="pin-label">
+                <i class="fas fa-clock" style="color: var(--primary);"></i>
+                ${agent.startTime}
             </div>
-            <button class="bs-close" onclick="closeBottomSheet()">&times;</button>
         </div>
-        ${mediaHTML}
-        ${tagsHTML}
-        ${infoRows}
-        ${actionsHTML}
     `;
 
-    overlay.classList.remove('hidden');
-
-    // Haptic feedback (if supported)
-    if (navigator.vibrate) { try { navigator.vibrate(10); } catch (e) {} }
-};
-
-// ============================================================================
-// BOTTOM SHEET — Close
-// ============================================================================
-window.closeBottomSheet = function (event) {
-    // If clicked inside the .bottom-sheet content, don't close
-    if (event && event.target && event.target.closest && event.target.closest('.bottom-sheet')) {
-        return;
-    }
-    const overlay = document.getElementById('map-bottom-sheet');
-    if (overlay) overlay.classList.add('hidden');
-};
-
-// ============================================================================
-// CONVENIENCE BUILDER — Dropped Pin
-// ============================================================================
-window.showPinBottomSheet = function (lat, lng, distanceInfo) {
-    const coords = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-    const info = [{ label: 'Coordinates', value: coords }];
-
-    if (distanceInfo && distanceInfo.length) {
-        info.push(...distanceInfo);
-    }
-
-    window.openBottomSheet({
-        title: '📍 Dropped Pin',
-        subtitle: 'Choose an action',
-        info: info,
-        actions: [
-            {
-                label: 'Save',
-                icon: 'fa-bookmark',
-                style: 'btn-primary',
-                onclick: `openModal('location-modal')`
-            },
-            {
-                label: 'Navigate',
-                icon: 'fa-directions',
-                style: 'btn-secondary',
-                onclick: `navigateToPoint(${lat},${lng})`
-            },
-            {
-                label: 'Clear',
-                icon: 'fa-times',
-                style: 'btn-secondary',
-                onclick: `closeBottomSheet(); if(window.mapModule){ mapModule.clearSavedMarker(); if(mapModule.clearRoadRoute) mapModule.clearRoadRoute(); }`
-            }
-        ]
+    const customIcon = L.divIcon({
+        html: iconHtml,
+        className: 'custom-div-icon',
+        iconSize: [60, 70],
+        iconAnchor: [30, 60]
     });
-};
 
-// ============================================================================
-// CONVENIENCE BUILDER — Live Vehicle / SteerAgent
-// ============================================================================
-window.showVehicleBottomSheet = function (vehicle, myLocation) {
-    const name = vehicle.ownerName || vehicle.name || 'Driver';
-    const phone = vehicle.phone || vehicle.owner || '';
-    const info = [];
-
-    if (vehicle.vehicle) info.push({ label: 'Vehicle', value: vehicle.vehicle });
-    if (vehicle.vehicleType) info.push({ label: 'Type', value: vehicle.vehicleType });
-
-    // Distance from me
-    if (myLocation && vehicle.lat && vehicle.lng && window.mapModule) {
-        try {
-            const km = mapModule.calculateDistance(
-                myLocation.lat, myLocation.lng, vehicle.lat, vehicle.lng
-            );
-            info.push({ label: 'Distance', value: mapModule.formatDistance(km) });
-        } catch (e) {}
-    }
-
-    // Last seen
-    if (vehicle.lastSeen || vehicle.updatedAt) {
-        const ts = vehicle.lastSeen || vehicle.updatedAt;
-        info.push({ label: 'Updated', value: timeAgo(ts) });
-    }
-
-    const safeName = name.replace(/'/g, "\\'");
-
-    window.openBottomSheet({
-        title: name,
-        subtitle: vehicle.vehicle || 'SteerAgent on the road',
-        image: vehicle.photo || vehicle.avatar || '',
-        tags: ['SteerAgent'],
-        info: info,
-        actions: [
-            {
-                label: 'Message',
-                icon: 'fa-comment',
-                style: 'btn-primary',
-                onclick: `mapModule.messageAgent('${phone}', '${safeName}'); closeBottomSheet();`
-            },
-            {
-                label: 'Where to?',
-                icon: 'fa-question-circle',
-                style: 'btn-secondary',
-                onclick: `mapModule.askWhereTo('${phone}'); closeBottomSheet();`
-            }
-        ]
+    const marker = L.marker([agent.lat, agent.lng], {
+        icon: customIcon,
+        riseOnHover: true
     });
-};
 
-// ============================================================================
-// CONVENIENCE BUILDER — Lane
-// ============================================================================
-window.showLaneBottomSheet = function (lane) {
-    const info = [];
-
-    if (lane.description) info.push({ label: 'Route', value: lane.description });
-    if (lane.seats != null) info.push({ label: 'Seats left', value: String(lane.seats) });
-    if (lane.fare != null && Number(lane.fare) > 0) info.push({ label: 'Fare', value: '₹ ' + lane.fare });
-    if (lane.vehicleType) info.push({ label: 'Vehicle', value: lane.vehicleType });
-
-    // Distance
-    if (window.state && state.userLocation && lane.lat && lane.lng && window.mapModule) {
-        try {
-            const km = mapModule.calculateDistance(
-                state.userLocation.lat, state.userLocation.lng, lane.lat, lane.lng
-            );
-            info.push({ label: 'Distance', value: mapModule.formatDistance(km) });
-        } catch (e) {}
-    }
-
-    const safeOwner = (lane.ownerName || 'Driver').replace(/'/g, "\\'");
-
-    window.openBottomSheet({
-        title: lane.title || 'Lane',
-        subtitle: lane.ownerName || 'Driver',
-        image: lane.photo || '',
-        tags: [
-            lane.vehicleType || 'Any',
-            (lane.seats || 0) + ' seats'
-        ],
-        info: info,
-        actions: [
-            {
-                label: 'Chat',
-                icon: 'fa-comment',
-                style: 'btn-secondary',
-                onclick: `openChat('${lane.id}', '${safeOwner}'); closeBottomSheet();`
-            },
-            {
-                label: 'Navigate',
-                icon: 'fa-directions',
-                style: 'btn-primary',
-                onclick: `navigateToLane('${lane.id}'); closeBottomSheet();`
-            }
-        ]
+    // ⭐ KEY: Click handler triggers the bottom sheet via features.js
+    marker.on('click', (e) => {
+        L.DomEvent.stopPropagation(e);
+        
+        if (typeof window.showLaneDetails === 'function') {
+            window.showLaneDetails(agent);
+        } else {
+            console.warn('[map-ui] showLaneDetails not found. Is features.js loaded?');
+        }
     });
-};
 
-// ============================================================================
-// CONVENIENCE BUILDER — Trip Summary
-// ============================================================================
-window.showTripBottomSheet = function (trip) {
-    const info = [];
-    if (trip.distanceKm) info.push({ label: 'Distance', value: trip.distanceKm + ' km' });
-    if (trip.fare) info.push({ label: 'Fare', value: '₹ ' + trip.fare });
-    if (trip.startedAt) info.push({ label: 'Started', value: new Date(trip.startedAt).toLocaleString() });
-    if (trip.endedAt) info.push({ label: 'Ended', value: new Date(trip.endedAt).toLocaleString() });
-
-    window.openBottomSheet({
-        title: 'Trip ' + (trip.status === 'active' ? 'in progress' : 'completed'),
-        subtitle: trip.id || '',
-        tags: [trip.status || 'unknown'],
-        info: info,
-        actions: []
+    // Optional: hover effect
+    marker.on('mouseover', function() {
+        this.getElement()?.querySelector('.custom-map-pin')?.style.setProperty('transform', 'scale(1.1)');
     });
-};
+    marker.on('mouseout', function() {
+        this.getElement()?.querySelector('.custom-map-pin')?.style.setProperty('transform', 'scale(1)');
+    });
 
-// ============================================================================
-// HELPERS
-// ============================================================================
-function escapeHtml(str) {
-    if (window.escapeHTML) return window.escapeHTML(str);
-    if (!str) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+    return marker;
 }
 
-function timeAgo(ts) {
-    if (!ts) return '';
-    const d = typeof ts === 'number' ? new Date(ts) : new Date(ts);
-    const secs = Math.floor((Date.now() - d.getTime()) / 1000);
-    if (secs < 60) return secs + 's ago';
-    if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
-    if (secs < 86400) return Math.floor(secs / 3600) + 'h ago';
-    return Math.floor(secs / 86400) + 'd ago';
-}
+// ========== 4. SEARCH FUNCTIONALITY ==========
+function bindSearchInput() {
+    const input = document.getElementById('map-search-input');
+    const clearBtn = document.getElementById('map-search-clear');
+    const resultsBox = document.getElementById('map-search-results');
 
-// ============================================================================
-// HOOK — Patch map.js vehicle rendering to make markers tap to bottom-sheet
-// ============================================================================
-(function patchVehicleTap() {
-    // Wait for mapModule to be ready
-    let attempts = 0;
-    const maxAttempts = 20;
+    if (!input || !resultsBox) return;
 
-    function tryPatch() {
-        if (!window.mapModule || typeof window.mapModule.renderVehicles !== 'function') {
-            if (++attempts < maxAttempts) return setTimeout(tryPatch, 250);
+    input.addEventListener('input', (e) => {
+        const query = e.target.value.trim();
+        
+        if (clearBtn) {
+            clearBtn.classList.toggle('hidden', !query);
+        }
+
+        if (query.length < 2) {
+            resultsBox.classList.add('hidden');
             return;
         }
 
-        const original = window.mapModule.renderVehicles.bind(window.mapModule);
+        // Debounce search
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => performSearch(query), 350);
+    });
 
-        window.mapModule.renderVehicles = function (vehicles, myLocation) {
-            // Call original first
-            original(vehicles, myLocation);
+    input.addEventListener('focus', () => {
+        if (input.value.trim().length >= 2) {
+            resultsBox.classList.remove('hidden');
+        }
+    });
 
-            // Now attach bottom-sheet tap handlers
-            // (The original binds a Leaflet popup; we also want an inline tap)
-            try {
-                const map = window.mapModule.getMap && window.mapModule.getMap();
-                if (!map) return;
+    // Close on outside click
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.map-search-bar') && !e.target.closest('.map-search-results')) {
+            resultsBox.classList.add('hidden');
+        }
+    });
+}
 
-                map.eachLayer(function (layer) {
-                    if (!layer || !layer.getLatLng) return;
-                    const latlng = layer.getLatLng();
-                    // Find the matching vehicle data
-                    const match = (vehicles || []).find(v =>
-                        Math.abs(Number(v.lat) - latlng.lat) < 0.0001 &&
-                        Math.abs(Number(v.lng) - latlng.lng) < 0.0001
-                    );
-                    if (!match) return;
+async function performSearch(query) {
+    const resultsBox = document.getElementById('map-search-results');
+    if (!resultsBox) return;
 
-                    // Replace popup with bottom-sheet trigger
-                    layer.off('click');
-                    layer.on('click', function () {
-                        window.showVehicleBottomSheet(match, myLocation);
-                    });
-                });
-            } catch (e) {
-                console.warn('[map-ui] vehicle patch error:', e);
-            }
-        };
+    resultsBox.classList.remove('hidden');
+    resultsBox.innerHTML = `<div class="search-loading"><div class="spinner"></div> Searching...</div>`;
 
-        console.log('[map-ui] Patched renderVehicles for tap-to-sheet');
+    try {
+        // Using Nominatim (OpenStreetMap) - free geocoding
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&countrycodes=in`;
+        const res = await fetch(url, {
+            headers: { 'Accept-Language': 'en' }
+        });
+        const data = await res.json();
+
+        if (!data || data.length === 0) {
+            resultsBox.innerHTML = `<div class="search-empty"><i class="fas fa-search"></i> No results found</div>`;
+            return;
+        }
+
+        resultsBox.innerHTML = data.map(place => `
+            <div class="search-result" data-lat="${place.lat}" data-lng="${place.lon}" data-name="${place.display_name}">
+                <i class="fas fa-map-marker-alt"></i>
+                <div class="search-result-info">
+                    <div class="search-result-title">${place.name || place.display_name.split(',')[0]}</div>
+                    <div class="search-result-sub">${place.display_name}</div>
+                </div>
+            </div>
+        `).join('');
+
+        // Bind click handlers
+        resultsBox.querySelectorAll('.search-result').forEach(el => {
+            el.addEventListener('click', () => {
+                const lat = parseFloat(el.dataset.lat);
+                const lng = parseFloat(el.dataset.lng);
+                map.flyTo([lat, lng], 15, { duration: 1.2 });
+                resultsBox.classList.add('hidden');
+            });
+        });
+
+    } catch (err) {
+        console.error('[search] error:', err);
+        resultsBox.innerHTML = `<div class="search-empty"><i class="fas fa-exclamation-triangle"></i> Search failed</div>`;
+    }
+}
+
+// ========== 5. MAP MODULE (Exposed to HTML) ==========
+const mapModule = {
+    recenter() {
+        if (!map) return;
+        map.flyTo([12.9716, 77.5946], 13, { duration: 0.8 });
+    },
+
+    locateUser(showToast = false) {
+        if (!map) return;
+        
+        if (!navigator.geolocation) {
+            if (showToast) alert('Geolocation not supported');
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                const { latitude, longitude } = pos.coords;
+                
+                if (userLocationMarker) {
+                    userLocationMarker.setLatLng([latitude, longitude]);
+                } else {
+                    userLocationMarker = L.circleMarker([latitude, longitude], {
+                        radius: 8,
+                        fillColor: '#4F46E5',
+                        color: '#fff',
+                        weight: 3,
+                        fillOpacity: 1
+                    }).addTo(map);
+                }
+
+                map.flyTo([latitude, longitude], 15, { duration: 1 });
+            },
+            (err) => {
+                console.error('[geolocation] error:', err);
+                if (showToast) alert('Could not get your location');
+            },
+            { enableHighAccuracy: true, timeout: 10000 }
+        );
+    },
+
+    zoomIn() { if (map) map.zoomIn(); },
+    zoomOut() { if (map) map.zoomOut(); },
+
+    clearSearch() {
+        const input = document.getElementById('map-search-input');
+        const clearBtn = document.getElementById('map-search-clear');
+        const resultsBox = document.getElementById('map-search-results');
+        
+        if (input) input.value = '';
+        if (clearBtn) clearBtn.classList.add('hidden');
+        if (resultsBox) resultsBox.classList.add('hidden');
+    },
+
+    cancelRoute() {
+        if (routeLayer) routeLayer.clearLayers();
+        isTripActive = false;
+        
+        const banner = document.getElementById('map-trip-banner');
+        if (banner) banner.classList.add('hidden');
+        
+        const tripBtn = document.getElementById('ctrl-trip');
+        if (tripBtn) {
+            tripBtn.classList.remove('active');
+            tripBtn.querySelector('i').className = 'fas fa-play';
+        }
+    }
+};
+
+// Expose globally
+window.mapModule = mapModule;
+
+// ========== 6. FILTER CHIPS ==========
+window.setMapFilter = function(filter, btn) {
+    currentFilter = filter;
+    
+    // Update active chip styling
+    document.querySelectorAll('.map-chip').forEach(c => c.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+
+    // Re-render
+    renderAgents(MOCK_AGENTS);
+};
+
+// ========== 7. GHOST MODE TOGGLE (SteerAgent only) ==========
+window.toggleGhostMode = function() {
+    isGhostMode = !isGhostMode;
+    const btn = document.getElementById('ctrl-ghost');
+    
+    if (btn) {
+        btn.classList.toggle('active', isGhostMode);
+        btn.style.background = isGhostMode ? 'var(--warning)' : '';
+    }
+    
+    if (window.showToast) {
+        window.showToast(isGhostMode ? 'Ghost mode ON' : 'Ghost mode OFF', 'info');
+    }
+};
+
+// ========== 8. TRIP TOGGLE (SteerAgent only) ==========
+window.toggleTrip = function() {
+    isTripActive = !isTripActive;
+    const btn = document.getElementById('ctrl-trip');
+    const banner = document.getElementById('map-trip-banner');
+
+    if (btn) {
+        btn.classList.toggle('active', isTripActive);
+        const icon = btn.querySelector('i');
+        if (icon) icon.className = isTripActive ? 'fas fa-stop' : 'fas fa-play';
     }
 
-    tryPatch();
-})();
+    if (banner) {
+        banner.classList.toggle('hidden', !isTripActive);
+    }
 
-// ============================================================================
-// READY LOG
-// ============================================================================
-console.log('[map-ui] v2.0 loaded');
+    if (window.showToast) {
+        window.showToast(isTripActive ? 'Trip started' : 'Trip ended', 'success');
+    }
+};
+
+// ========== 9. REPORT ALERT (used from report modal) ==========
+window.reportAlert = function(type) {
+    const icons = {
+        traffic: '🚧',
+        pothole: '🕳️',
+        police: '🚓',
+        accident: '⚠️'
+    };
+
+    const center = map ? map.getCenter() : { lat: 12.9716, lng: 77.5946 };
+    
+    const alertMarker = L.marker([center.lat, center.lng], {
+        icon: L.divIcon({
+            html: `<div style="font-size: 24px;">${icons[type] || '⚠️'}</div>`,
+            className: 'custom-alert-icon',
+            iconSize: [30, 30],
+            iconAnchor: [15, 15]
+        })
+    }).addTo(map);
+
+    // Auto-remove after 5 minutes
+    setTimeout(() => alertMarker.remove(), 5 * 60 * 1000);
+
+    // Close modal
+    if (typeof window.closeModal === 'function') {
+        window.closeModal('report-modal');
+    }
+
+    if (window.showToast) {
+        window.showToast(`Reported: ${type}`, 'success');
+    }
+};
+
+// ========== 10. AUTO-INIT ==========
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initMap);
+} else {
+    // Small delay to ensure DOM is fully ready
+    setTimeout(initMap, 100);
+}
+
+// Export for module use
+export { map, mapModule, renderAgents };
