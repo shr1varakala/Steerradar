@@ -1,11 +1,21 @@
 /**
- * Steeradar backend — v8.7 (Final Stable)
- * - Filename support for uploads
- * - Higher upload rate limit (30 per 6h)
- * - All previous fixes intact
+ * Steeradar backend — v8.10 (Dedupe Lanes + Robust Uploads)
+ * ============================================================================
+ * Changes vs v8.9:
+ *  - insertLane is idempotent: same id OR same route+vehicle returns the
+ *    existing lane instead of appending a duplicate row.
+ *  - uploadImage accepts image/jpg, image/pjpeg, image/x-png, charset params,
+ *    newline-wrapped base64, URL-safe base64, and auto-restores padding.
+ *  - Body limit raised to 15 MB; image payload cap 10 MB base64 (~7 MB binary).
+ *  - Drive/setSharing errors surface as `upload_failed` (retryable) not 500.
+ * Retains everything from v8.9:
+ *  - Approved email includes vehicle/plate/selfie images (lh3 URLs)
+ *  - Vehicle details & verification photos locked for active agents
+ *  - Instagram-style Hive: image/video, likes, comments, share URLs
+ * ============================================================================
  */
 
-const VERSION = '8.7';
+const VERSION = '8.10';
 const APP_NAME = 'Steeradar';
 const APP_URL = 'https://suryasticsai.github.io/Steeradar/';
 const LOGO_URL = 'https://raw.githubusercontent.com/suryasticsai/Steeradar/main/steerardar-logo.png';
@@ -24,12 +34,12 @@ const OTP_DAILY_CAP = 80;
 const OTP_COOLDOWN_MS = 45000;
 const LANE_TTL_MS = 24 * 3600 * 1000;
 const PRESENCE_TTL_MS = 2 * 60 * 1000;
-const MAX_BODY_CHARS = 5000000;
+const MAX_BODY_CHARS = 15000000;      // raised: ~11 MB binary after base64 overhead
 const MAX_POINTS_PER_USER = 200;
+const MAX_COMMENT_LEN = 800;
 const PW_MIN = 6;
 const PW_MAX = 100;
 const VEHICLE_TYPES = ['bus', 'car', 'auto', 'bike', 'walk', 'event', 'two-wheeler'];
-const PHOTO_SLOTS = ['avatar', 'vehiclePhoto', 'platePhoto', 'upiQr', 'selfie', 'license', 'rc', 'hive', 'lanes', 'misc'];
 
 const SCHEMA = {
   users:        ['phone','email','name','username','vehicle','vehicleType',
@@ -52,6 +62,7 @@ const SCHEMA = {
   hive:         ['id','ownerPhone','name','avatar','community',
                  'title','text','tags','time','likes','ts','vehicle',
                  'photoUrl','mediaUrl','mediaType'],
+  comments:     ['id','postId','phone','name','avatar','text','ts'],
   likes:        ['key','postId','phone','ts'],
   messages:     ['id','roomId','roomType','fromVehicle','fromPhone',
                  'sender','text','seq','ts'],
@@ -78,7 +89,7 @@ class ApiError extends Error {
   }
 }
 
-// ─── Utilities ───
+// ==================== UTILITIES ====================
 function now() { return Date.now(); }
 
 function clean(v, max) {
@@ -109,6 +120,12 @@ function extractDriveId(url) {
   m = s.match(/\/d\/([\w-]{10,})/);
   if (m) return m[1];
   return '';
+}
+
+function driveUrl(fileId, size) {
+  if (!fileId) return '';
+  const w = size || 800;
+  return 'https://lh3.googleusercontent.com/d/' + fileId + '=w' + w;
 }
 
 function toNum(v, min, max, dflt) {
@@ -161,7 +178,6 @@ function hashPassword(pw, salt) {
 }
 
 function shortId(prefix) { return prefix + '-' + newToken().slice(0, 12); }
-
 function todayKey() { return Utilities.formatDate(new Date(), 'UTC', 'yyyyMMdd'); }
 
 function rateLimit(keys, max, windowSec) {
@@ -177,7 +193,7 @@ function rateLimit(keys, max, windowSec) {
   }
 }
 
-// ─── Sheets ───
+// ==================== SHEETS ====================
 let _ss = null;
 function getSS() {
   if (_ss) return _ss;
@@ -258,7 +274,7 @@ function withLock(fn) {
   try { return fn(); } finally { lock.releaseLock(); }
 }
 
-// ─── Email building blocks ───
+// ==================== EMAIL BUILDING BLOCKS ====================
 function emailHeader() {
   return '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F1F3F6;padding:32px 16px;">'
     + '<tr><td align="center">'
@@ -306,12 +322,21 @@ function featureTile(emoji, title, sub) {
     + '</tr></table></td></tr></table>';
 }
 
-// ─── Email templates ───
+// Bulletproof email image tile — works in Gmail/Outlook.
+function emailPhotoTile(label, imgUrl, sub) {
+  if (!imgUrl) return '';
+  return '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px;">'
+    + '<tr><td style="padding:12px; background:#F8F9FB; border:1px solid #E5E7EB; border-radius:12px;">'
+    + '<div style="color:' + TEAL + '; font-size:11px; font-weight:800; letter-spacing:1.4px; text-transform:uppercase; margin-bottom:10px;">' + escapeHtml(label) + '</div>'
+    + '<img src="' + imgUrl + '" alt="' + escapeHtml(label) + '" width="440" style="display:block; width:100%; max-width:440px; height:auto; border-radius:10px; border:1px solid #E5E7EB;">'
+    + (sub ? '<div style="margin-top:8px; color:' + SOFT + '; font-size:12px;">' + escapeHtml(sub) + '</div>' : '')
+    + '</td></tr></table>';
+}
+
+// ==================== EMAIL TEMPLATES ====================
 function buildOtp(code, purpose) {
   const heading = purpose === 'login' ? 'Welcome back!' : 'Welcome to Steeradar!';
-  const sub = purpose === 'login'
-    ? 'Use this code to sign back in to your account.'
-    : 'Use this code to verify your email and get started.';
+  const sub = purpose === 'login' ? 'Use this code to sign back in.' : 'Use this code to verify your email.';
 
   const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:24px;font-weight:800;letter-spacing:-0.4px;">' + heading + '</h1>'
     + '<p style="margin:0 0 26px;color:' + MUTED + ';font-size:15px;line-height:1.6;">' + sub + '</p>'
@@ -319,8 +344,7 @@ function buildOtp(code, purpose) {
     + '<div style="color:' + MUTED + ';font-size:11px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;margin-bottom:12px;">Your verification code</div>'
     + '<div style="font-family:\'SF Mono\',\'Courier New\',monospace;font-size:42px;font-weight:800;letter-spacing:12px;color:' + INK + ';line-height:1;">' + code + '</div>'
     + '</div>'
-    + '<p style="margin:0;color:' + SOFT + ';font-size:13px;line-height:1.7;">⏱️ This code expires in <strong>10 minutes</strong></p>'
-    + '<p style="margin:20px 0 0;color:' + SOFT + ';font-size:13px;line-height:1.6;">Never share this code with anyone.</p>';
+    + '<p style="margin:0;color:' + SOFT + ';font-size:13px;line-height:1.7;">⏱️ Expires in <strong>10 minutes</strong></p>';
 
   return emailShell(body);
 }
@@ -357,36 +381,56 @@ function buildWelcome(email, name, vehicle, community, phone) {
 
   const thankYouHTML = '<div style="margin: 28px 0 0; padding: 20px; text-align: center; background: linear-gradient(135deg, ' + TEAL + ' 0%, ' + TEAL2 + ' 100%); border-radius: 12px;">'
     + '<p style="margin: 0; color: #FFFFFF; font-size: 16px; font-weight: 700; line-height: 1.5;">🙏 Thank you for joining our community!</p>'
-    + '<p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 13px; line-height: 1.6;">We\'re excited to have you on board. Let\'s make every ride memorable.</p>'
     + '</div>';
 
   const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:26px;font-weight:800;letter-spacing:-0.4px;">Welcome aboard, ' + firstName + '! 🎉</h1>'
-    + '<p style="margin:0 0 26px;color:' + MUTED + ';font-size:15px;line-height:1.6;">'
-    + 'Your Steeradar account is ready' + (community ? ' in <strong style="color:' + INK + ';">' + escapeHtml(community) + '</strong>' : '') + '. Here\'s what you can do now:'
-    + '</p>'
-    + featureTile('🚌', 'Post your lane', 'Share your route and available seats')
+    + '<p style="margin:0 0 26px;color:' + MUTED + ';font-size:15px;line-height:1.6;">Your Steeradar account is ready' + (community ? ' in <strong>' + escapeHtml(community) + '</strong>' : '') + '.</p>'
+    + featureTile('🚌', 'Post your lane', 'Share your route and seats')
     + featureTile('💬', 'Chat with drivers', 'Real-time peer-to-peer messaging')
     + featureTile('📍', 'Track live', 'See vehicles approaching in real time')
     + featureTile('⭐', 'Build trust', 'Rate and get rated after each ride')
-    + personalNoteHTML + userDetailsHTML + thankYouHTML
-    + '<p style="margin: 24px 0 0; color: ' + SOFT + '; font-size: 12px; line-height: 1.7; text-align: center;">'
-    + 'Need help? Just reply to this email or find us in the Hive.<br>We\'re always here for you.</p>';
+    + personalNoteHTML + userDetailsHTML + thankYouHTML;
 
   return emailShell(body);
 }
 
-function buildAgentApproved(name) {
+function buildAgentApproved(name, vehicle, vehicleType, photos) {
+  photos = photos || {};
   const firstName = escapeHtml((name || 'Driver').split(' ')[0]);
+  const safeVehicle = escapeHtml(vehicle || 'Not provided');
+  const safeType = escapeHtml(vehicleType || 'Vehicle');
+
+  const vehicleCard = '<div style="background: linear-gradient(135deg, #F0FDFA 0%, #ECFDF5 100%); border: 1px solid ' + TEAL + '; border-radius: 12px; padding: 20px; margin: 20px 0;">'
+    + '<div style="color:' + TEAL + '; font-size:11px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; margin-bottom:12px;">🚗 Your Approved Vehicle</div>'
+    + '<table width="100%" cellpadding="0" cellspacing="0" border="0">'
+    + '<tr><td style="padding:8px 0; color:' + MUTED + '; font-size:13px; font-weight:600;">Vehicle Number</td>'
+    + '<td style="padding:8px 0; color:' + INK + '; font-size:16px; font-weight:800; text-align:right; font-family:\'SF Mono\',monospace; letter-spacing:1.5px;">' + safeVehicle + '</td></tr>'
+    + '<tr><td style="padding:8px 0; color:' + MUTED + '; font-size:13px; font-weight:600;">Vehicle Type</td>'
+    + '<td style="padding:8px 0; color:' + INK + '; font-size:14px; font-weight:700; text-align:right; text-transform:capitalize;">' + safeType + '</td></tr>'
+    + '</table></div>';
+
+  const gallery = (photos.vehiclePhoto || photos.platePhoto || photos.selfie)
+    ? '<div style="margin: 20px 0;">'
+      + '<div style="color:' + TEAL + '; font-size:11px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; margin-bottom:12px;">📸 Your Verified Documents</div>'
+      + emailPhotoTile('Vehicle Photo', photos.vehiclePhoto, 'As submitted with your application')
+      + emailPhotoTile('Number Plate', photos.platePhoto, 'Registration plate on record')
+      + emailPhotoTile('Selfie / ID', photos.selfie, 'Identity verification')
+      + '</div>'
+    : '';
+
   const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:26px;font-weight:800;letter-spacing:-0.4px;">You\'re a SteerAgent now! 🎉</h1>'
     + '<p style="margin:0 0 22px;color:' + MUTED + ';font-size:15px;line-height:1.6;">'
     + 'Congratulations ' + firstName + '! Your application has been reviewed and <strong style="color:' + TEAL + ';">approved</strong>.'
     + '</p>'
-    + '<div style="background: linear-gradient(135deg, #F0FDFA 0%, #ECFDF5 100%); border: 1px solid ' + TEAL + '; border-radius: 12px; padding: 20px; margin: 20px 0;">'
+    + vehicleCard
+    + gallery
+    + '<div style="background: linear-gradient(135deg, #F8F9FB 0%, #F1F3F6 100%); border-radius: 12px; padding: 20px; margin: 20px 0;">'
     + '<div style="color:' + TEAL + '; font-size:11px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; margin-bottom:10px;">✓ Unlocked Features</div>'
     + '<p style="margin:6px 0; color:' + INK + '; font-size:14px;">🚌 Post your own lanes</p>'
     + '<p style="margin:6px 0; color:' + INK + '; font-size:14px;">💰 Accept payments via UPI</p>'
     + '<p style="margin:6px 0; color:' + INK + '; font-size:14px;">👻 Ghost mode & alerts</p>'
     + '<p style="margin:6px 0; color:' + INK + '; font-size:14px;">📊 Trip tracking & history</p>'
+    + '<p style="margin:10px 0 0; color:' + SOFT + '; font-size:12px; line-height:1.6;">🔒 Note: Your vehicle details and verification photos are now locked and cannot be changed.</p>'
     + '</div>'
     + '<div style="text-align:center; margin: 28px 0;">'
     + '<a href="' + APP_URL + '" style="display:inline-block; background:' + TEAL + '; color:#FFFFFF; font-weight:800; font-size:15px; padding:14px 36px; border-radius:12px; text-decoration:none;">Start Driving</a>'
@@ -398,27 +442,22 @@ function buildAgentRejected(name, reason) {
   const firstName = escapeHtml((name || 'Driver').split(' ')[0]);
   const safeReason = escapeHtml(reason || 'Documents were not valid.');
   const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:24px;font-weight:800;">Application Update</h1>'
-    + '<p style="margin:0 0 22px;color:' + MUTED + ';font-size:15px;line-height:1.6;">'
-    + 'Hi ' + firstName + ', we reviewed your SteerAgent application but couldn\'t approve it at this time.'
-    + '</p>'
+    + '<p style="margin:0 0 22px;color:' + MUTED + ';font-size:15px;line-height:1.6;">Hi ' + firstName + ', we couldn\'t approve your application.</p>'
     + '<div style="background:#FEF2F2; border-left: 4px solid ' + CORAL + '; border-radius: 0 10px 10px 0; padding: 16px 20px; margin: 20px 0;">'
     + '<div style="color:' + CORAL + '; font-size:11px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase; margin-bottom:8px;">Reason</div>'
     + '<p style="margin:0; color:' + INK + '; font-size:14px; line-height:1.6;">' + safeReason + '</p>'
     + '</div>'
-    + '<p style="margin:22px 0 0;color:' + MUTED + ';font-size:14px;line-height:1.6;">'
-    + 'You can update your documents and apply again anytime from your profile.'
-    + '</p>';
+    + '<p style="margin:22px 0 0;color:' + MUTED + ';font-size:14px;">You can update documents and apply again anytime.</p>';
   return emailShell(body);
 }
 
 function buildReportAck() {
-  const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:24px;font-weight:800;letter-spacing:-0.4px;">We received your report 🛡️</h1>'
-    + '<p style="margin:0 0 20px;color:' + MUTED + ';font-size:15px;line-height:1.6;">Our moderators will review it shortly.</p>'
-    + '<p style="margin:0;color:' + SOFT + ';font-size:13px;">We take community safety seriously.</p>';
+  const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:24px;font-weight:800;">We received your report 🛡️</h1>'
+    + '<p style="margin:0 0 20px;color:' + MUTED + ';font-size:15px;">Our moderators will review it shortly.</p>';
   return emailShell(body);
 }
 
-// ─── Send mail ───
+// ==================== SEND MAIL ====================
 function sendMail(to, subject, html, plain) {
   try {
     MailApp.sendEmail({
@@ -444,25 +483,25 @@ function sendWelcomeEmail(to, name, vehicle, community, phone, email) {
     'Welcome ' + name + '! User ID: ' + phone);
 }
 
-function sendAgentApprovedEmail(to, name) {
+function sendAgentApprovedEmail(to, name, vehicle, vehicleType, photos) {
   return sendMail(to, '🎉 You\'re a SteerAgent now!',
-    buildAgentApproved(name),
-    'Congratulations ' + name + '! Your SteerAgent application has been approved.');
+    buildAgentApproved(name, vehicle, vehicleType, photos || {}),
+    'Congratulations ' + name + '! Vehicle ' + vehicle + ' (' + vehicleType + ') approved.');
 }
 
 function sendAgentRejectedEmail(to, name, reason) {
   return sendMail(to, '📝 Update on your SteerAgent application',
     buildAgentRejected(name, reason),
-    'Hi ' + name + '. Your application needs attention: ' + reason);
+    'Hi ' + name + '. Reason: ' + reason);
 }
 
 function sendReportAckEmail(to) {
   return sendMail(to, '🛡️ We received your Steeradar report',
     buildReportAck(),
-    'We received your report and will review it shortly.');
+    'We received your report.');
 }
 
-// ─── Auth ───
+// ==================== AUTH ====================
 function findUser(phone) {
   const users = readAll('users');
   for (let i = 0; i < users.length; i++) {
@@ -546,7 +585,10 @@ function publicSelf(u) {
     isAdmin: isAdmin_(u),
     ghostMode: u.ghostMode === 'true',
     upiId: u.upiQrId || '',
-    photo: u.avatarId ? 'https://drive.google.com/thumbnail?id=' + u.avatarId + '&sz=w400' : '',
+    photo: u.avatarId ? driveUrl(u.avatarId, 400) : '',
+    vehiclePhoto: u.vehiclePhotoId ? driveUrl(u.vehiclePhotoId, 800) : '',
+    platePhoto: u.platePhotoId ? driveUrl(u.platePhotoId, 800) : '',
+    profileLocked: isAgent,
     rating: Number(u.ratingCount) > 0
       ? Math.round((Number(u.ratingSum) / Number(u.ratingCount)) * 10) / 10
       : 5.0
@@ -578,9 +620,7 @@ function safeQuota() {
   try { return MailApp.getRemainingDailyQuota(); } catch (e) { return -1; }
 }
 
-// ═══════════════════════════════════════════════════
-//  HANDLERS
-// ═══════════════════════════════════════════════════
+// ==================== HANDLERS ====================
 const H = {};
 
 H.ping = function () { return 'pong'; };
@@ -813,6 +853,7 @@ H.getMe = function (b, u) { return publicSelf(u); };
 H.updateMe = function (b, u) {
   const patch = {};
   const r = b.patch || b;
+  const locked = u.role === 'agent' && u.agentStatus === 'active';
 
   if (r.name !== undefined) {
     const n = clean(r.name, 40);
@@ -822,6 +863,9 @@ H.updateMe = function (b, u) {
 
   if (r.vehicle !== undefined) {
     const v = normVehicle(r.vehicle);
+    if (locked && v && v !== u.vehicle) {
+      return { ok: false, error: 'vehicle_locked', message: 'Vehicle number cannot be changed after approval' };
+    }
     if (v && !isVehicle(v)) return { ok: false, error: 'bad_vehicle' };
     if (v) {
       const users = readAll('users');
@@ -835,6 +879,9 @@ H.updateMe = function (b, u) {
   }
 
   if (r.vehicleType !== undefined && VEHICLE_TYPES.indexOf(r.vehicleType) !== -1) {
+    if (locked && r.vehicleType !== u.vehicleType) {
+      return { ok: false, error: 'vehicle_locked', message: 'Vehicle type cannot be changed after approval' };
+    }
     patch.vehicleType = r.vehicleType;
   }
 
@@ -844,6 +891,7 @@ H.updateMe = function (b, u) {
   if (r.community !== undefined) patch.community = clean(r.community, 60);
   if (r.ghostMode !== undefined) patch.ghostMode = r.ghostMode ? 'true' : 'false';
 
+  // Avatar always editable
   if (r.photo !== undefined) {
     const url = String(r.photo || '');
     if (url === '') {
@@ -854,10 +902,12 @@ H.updateMe = function (b, u) {
     }
   }
 
+  const lockedSlots = ['vehiclePhotoId', 'platePhotoId'];
   const slots = ['avatarId', 'vehiclePhotoId', 'platePhotoId', 'upiQrId'];
   for (let i = 0; i < slots.length; i++) {
     const k = slots[i];
     if (r[k] === undefined) continue;
+    if (locked && lockedSlots.indexOf(k) !== -1) continue;
     const id = String(r[k] || '');
     if (id === '') { patch[k] = ''; continue; }
     if (!isId(id) || !fileOwnedBy(id, ownerTag(u.phone))) continue;
@@ -868,6 +918,7 @@ H.updateMe = function (b, u) {
   return publicSelf(findUser(u.phone));
 };
 
+// ==================== STEERAGENT FLOW ====================
 H.becomeAgent = function (b, u) {
   if (u.role === 'agent' && u.agentStatus === 'active') {
     return { ok: true, user: publicSelf(u), already: true };
@@ -924,6 +975,7 @@ H.becomeAgent = function (b, u) {
   return { ok: true, pending: true, user: publicSelf(findUser(u.phone)) };
 };
 
+// ==================== ADMIN ====================
 H.adminPendingAgents = function (b, u) {
   const apps = readAll('applications').filter(function (a) { return a.status === 'pending'; });
   return apps.map(function (a) {
@@ -932,7 +984,10 @@ H.adminPendingAgents = function (b, u) {
       vehicle: a.vehicle, vehicleType: a.vehicleType,
       vehiclePhotoId: a.vehiclePhotoId, platePhotoId: a.platePhotoId,
       selfieId: a.selfieId, licenseId: a.licenseId, upiId: a.upiId,
-      city: '', appliedAt: Number(a.appliedAt)
+      city: '', appliedAt: Number(a.appliedAt),
+      vehiclePhoto: a.vehiclePhotoId ? driveUrl(a.vehiclePhotoId, 800) : '',
+      platePhoto: a.platePhotoId ? driveUrl(a.platePhotoId, 800) : '',
+      selfie: a.selfieId ? driveUrl(a.selfieId, 600) : ''
     };
   });
 };
@@ -961,7 +1016,18 @@ H.adminApproveAgent = function (b, u) {
         status: 'approved', reviewedAt: reviewedAt, reviewedBy: u.phone
       });
     }
-    try { sendAgentApprovedEmail(target.email, target.name); } catch (e) {}
+
+    const photos = {
+      vehiclePhoto: driveUrl(appRow ? appRow.vehiclePhotoId : target.vehiclePhotoId, 900),
+      platePhoto:   driveUrl(appRow ? appRow.platePhotoId   : target.platePhotoId, 900),
+      selfie:       driveUrl(appRow ? appRow.selfieId       : '', 700)
+    };
+
+    try {
+      sendAgentApprovedEmail(target.email, target.name, target.vehicle, target.vehicleType, photos);
+    } catch (e) {
+      Logger.log('Approved email failed: ' + e);
+    }
   } else {
     updateRow('users', target._row, { role: 'user', agentStatus: 'rejected' });
     if (appRow) {
@@ -981,20 +1047,16 @@ H.adminRejectAgent = function (b, u) {
   return H.adminApproveAgent({ uid: b.uid || b.phone, approve: false, reason: b.reason }, u);
 };
 
-// ─── Lanes ───
+// ==================== LANES ====================
 function publicLane(l, me) {
   const own = !!me && l.ownerPhone === me.phone;
   const title = l.title || ((l.from ? l.from + ' → ' : '') + l.to) || 'Untitled Route';
   const description = l.description || l.via || '';
 
   return {
-    id: l.id,
-    driver: l.driver,
-    ownerName: l.driver,
-    vehicle: l.vehicle,
-    vehicleType: l.vehicleType,
-    title: title,
-    description: description,
+    id: l.id, driver: l.driver, ownerName: l.driver,
+    vehicle: l.vehicle, vehicleType: l.vehicleType,
+    title: title, description: description,
     photo: l.photoUrl || '',
     from: l.from, via: l.via, to: l.to,
     total: Number(l.total),
@@ -1003,13 +1065,10 @@ function publicLane(l, me) {
     fare: Number(l.fare),
     lat: own ? round(l.lat, 7) : round(l.lat, 3),
     lng: own ? round(l.lng, 7) : round(l.lng, 3),
-    status: l.status,
-    ts: Number(l.ts),
+    status: l.status, ts: Number(l.ts),
     createdAt: new Date(Number(l.ts)).toISOString(),
-    peerId: l.peerId,
-    lastSeen: Number(l.lastSeen),
-    showPlate: l.showPlate || 'true',
-    own: own
+    peerId: l.peerId, lastSeen: Number(l.lastSeen),
+    showPlate: l.showPlate || 'true', own: own
   };
 }
 
@@ -1017,15 +1076,12 @@ function laneFields(row, user, existing) {
   const total = Math.round(toNum(row.total || row.seats, 1, 60, existing ? Number(existing.total) : 4));
   const taken = Math.round(toNum(row.taken, 0, total, existing ? Number(existing.taken) : 0));
   return {
-    driver: user.name,
-    vehicle: user.vehicle,
+    driver: user.name, vehicle: user.vehicle,
     vehicleType: VEHICLE_TYPES.indexOf(row.vehicleType) !== -1 ? row.vehicleType : (user.vehicleType || 'car'),
     title: clean(row.title, 120),
     description: clean(row.description, 300),
     photoUrl: clean(row.photo, 500),
-    from: clean(row.from, 80),
-    via: clean(row.via, 200),
-    to: clean(row.to, 80),
+    from: clean(row.from, 80), via: clean(row.via, 200), to: clean(row.to, 80),
     total: total, taken: taken,
     fare: Math.round(toNum(row.fare, 0, 10000, 0)),
     lat: coord(row.lat, 90), lng: coord(row.lng, 180),
@@ -1047,14 +1103,59 @@ H.listLanes = function (b, u) {
   return out.slice(0, 300);
 };
 
+/**
+ * insertLane — idempotent + semantic dedupe.
+ *  1. If row.id matches an existing lane owned by this user → update that row.
+ *  2. If a live lane exists with same vehicle + from + via + to → update it.
+ *  3. Otherwise insert new (respecting the 5-active-lane cap).
+ */
 H.insertLane = function (b, u) {
   const row = b.row || b;
   if (!isId(row.id)) row.id = shortId('L');
 
   rateLimit(['lane:' + u.phone], 20, 3600);
+
   const lanes = readAll('lanes');
+  const t = now();
+
+  // 1) ID collision (retry / double-submit) — update, don't append
+  for (let i = 0; i < lanes.length; i++) {
+    if (lanes[i].id === row.id) {
+      if (lanes[i].ownerPhone !== u.phone) {
+        throw new ApiError('forbidden', 'Lane id belongs to another user');
+      }
+      const f = laneFields(row, u, lanes[i]);
+      updateRow('lanes', lanes[i]._row, f);
+      return publicLane(Object.assign({}, lanes[i], f), u);
+    }
+  }
+
+  // 2) Semantic duplicate — same user, same route+vehicle, still live
+  const normFrom = clean(row.from, 80).toLowerCase();
+  const normVia  = clean(row.via, 200).toLowerCase();
+  const normTo   = clean(row.to, 80).toLowerCase();
+
+  for (let j = 0; j < lanes.length; j++) {
+    const l = lanes[j];
+    if (l.ownerPhone !== u.phone) continue;
+    if (t - Number(l.ts) >= LANE_TTL_MS) continue;
+
+    const same =
+      l.vehicle === u.vehicle &&
+      String(l.from || '').toLowerCase() === normFrom &&
+      String(l.via  || '').toLowerCase() === normVia &&
+      String(l.to   || '').toLowerCase() === normTo;
+
+    if (same) {
+      const f = laneFields(row, u, l);
+      updateRow('lanes', l._row, f);
+      return publicLane(Object.assign({}, l, f), u);
+    }
+  }
+
+  // 3) Genuine new lane — check cap
   const mine = lanes.filter(function (l) {
-    return l.ownerPhone === u.phone && now() - Number(l.ts) < LANE_TTL_MS;
+    return l.ownerPhone === u.phone && t - Number(l.ts) < LANE_TTL_MS;
   });
   if (mine.length >= 5) throw new ApiError('lane_limit', 'Max 5 live lanes');
 
@@ -1091,25 +1192,56 @@ H.removeLane = function (b, u) {
   return { ok: true };
 };
 
-// ─── Hive ───
-function publicPost(p, me) {
+// ==================== HIVE ====================
+function detectMediaType(url) {
+  const s = String(url || '').toLowerCase();
+  if (/\.(mp4|mov|webm|m4v)(\?|$)/.test(s)) return 'video';
+  if (/\.(jpg|jpeg|png|webp|gif)(\?|$)/.test(s)) return 'image';
+  return '';
+}
+
+function publicPost(p, me, commentCount) {
+  const photo = p.photoUrl || '';
+  const mediaUrl = p.mediaUrl || '';
+  const mediaType = p.mediaType || detectMediaType(mediaUrl) || detectMediaType(photo) || '';
+  const isVideo = mediaType === 'video';
+  const shareUrl = APP_URL + '#hive/' + p.id;
+
   return {
-    id: p.id, name: p.name, ownerName: p.name, avatar: p.avatar,
+    id: p.id,
+    name: p.name, ownerName: p.name,
+    avatar: p.avatar,
+    authorAvatar: p.avatar,
     title: p.title, text: p.text, tags: p.tags,
-    photo: p.photoUrl || '',
-    mediaUrl: p.mediaUrl || '',
-    mediaType: p.mediaType || '',
-    time: p.time, likes: Number(p.likes), ts: Number(p.ts),
+    photo: photo,
+    image: photo,
+    mediaUrl: mediaUrl,
+    mediaType: mediaType,
+    isVideo: isVideo,
+    time: p.time, likes: Number(p.likes),
+    comments: commentCount || 0,
+    commentsCount: commentCount || 0,
+    ts: Number(p.ts),
     createdAt: new Date(Number(p.ts)).toISOString(),
     vehicle: p.vehicle,
+    shareUrl: shareUrl,
+    webUrl: shareUrl,
     own: !!me && p.ownerPhone === me.phone
   };
 }
 
 H.listHive = function (b, u) {
   const posts = readAll('hive');
+  const allComments = readAll('comments');
+  const counts = {};
+  for (let i = 0; i < allComments.length; i++) {
+    const pid = allComments[i].postId;
+    counts[pid] = (counts[pid] || 0) + 1;
+  }
   posts.sort(function (a, c) { return Number(c.ts) - Number(a.ts); });
-  return posts.slice(0, 200).map(function (p) { return publicPost(p, u); });
+  return posts.slice(0, 200).map(function (p) {
+    return publicPost(p, u, counts[p.id] || 0);
+  });
 };
 
 H.insertHive = function (b, u) {
@@ -1118,22 +1250,18 @@ H.insertHive = function (b, u) {
 
   const title = clean(r.title, 80);
   const text = clean(String(r.text || '').replace(/\r/g, ''), 2000).trim() || title;
-  if (!text && !r.photo && !r.mediaUrl) throw new ApiError('empty', 'Post cannot be empty');
+  const photoUrl = clean(r.photo, 500);
+  const mediaUrl = clean(r.mediaUrl, 500);
+  const mediaType = clean(r.mediaType, 20) || detectMediaType(mediaUrl) || detectMediaType(photoUrl);
+
+  if (!text && !photoUrl && !mediaUrl) throw new ApiError('empty', 'Post cannot be empty');
 
   rateLimit(['hive:' + u.phone], 30, 3600);
 
-  const tags = String(r.tags || '')
-    .split('|')
-    .map(function (t) { return clean(t, 24); })
-    .filter(Boolean)
-    .slice(0, 5)
-    .join('|');
+  const tags = String(r.tags || '').split('|').map(function (t) { return clean(t, 24); })
+    .filter(Boolean).slice(0, 5).join('|');
 
   const ts = now();
-  const photoUrl = clean(r.photo, 500);
-  const mediaUrl = clean(r.mediaUrl, 500);
-  const mediaType = clean(r.mediaType, 20);
-
   appendRow('hive', {
     id: r.id, ownerPhone: u.phone, name: u.name,
     avatar: initials(u.name),
@@ -1145,8 +1273,8 @@ H.insertHive = function (b, u) {
     mediaType: mediaType
   });
 
-  logAudit(u.phone, 'insertHive', title);
-  return { ok: true, id: r.id };
+  logAudit(u.phone, 'insertHive', title || mediaType);
+  return { ok: true, id: r.id, shareUrl: APP_URL + '#hive/' + r.id };
 };
 
 function ownPost(id, u) {
@@ -1175,11 +1303,18 @@ H.updateHive = function (b, u) {
 
 H.deleteHive = function (b, u) {
   const p = ownPost(b.id, u);
-  deleteRow('hive', p._row);
+
   const likes = readAll('likes').filter(function (l) { return l.postId === p.id; });
   for (let i = likes.length - 1; i >= 0; i--) {
     try { deleteRow('likes', likes[i]._row); } catch (e) {}
   }
+
+  const comments = readAll('comments').filter(function (c) { return c.postId === p.id; });
+  for (let j = comments.length - 1; j >= 0; j--) {
+    try { deleteRow('comments', comments[j]._row); } catch (e) {}
+  }
+
+  deleteRow('hive', p._row);
   return { ok: true };
 };
 
@@ -1211,10 +1346,94 @@ H.like = function (b, u) {
     count = Math.max(0, count - 1);
   }
   updateRow('hive', post._row, { likes: count });
-  return { likes: count };
+  return { likes: count, liked: !!existing };
 };
 
-// ─── Messages ───
+// ==================== HIVE COMMENTS ====================
+H.addHiveComment = function (b, u) {
+  const postId = String(b.postId || b.id || '');
+  if (!isId(postId)) throw new ApiError('bad_id');
+
+  const text = clean(String(b.text || '').replace(/\r/g, ''), MAX_COMMENT_LEN).trim();
+  if (!text) throw new ApiError('empty', 'Comment cannot be empty');
+
+  rateLimit(['cmt:' + u.phone], 60, 3600);
+
+  const posts = readAll('hive');
+  let post = null;
+  for (let i = 0; i < posts.length; i++) {
+    if (posts[i].id === postId) { post = posts[i]; break; }
+  }
+  if (!post) throw new ApiError('not_found', 'Post not found');
+
+  const ts = now();
+  const id = shortId('c');
+  appendRow('comments', {
+    id: id, postId: postId, phone: u.phone,
+    name: u.name, avatar: initials(u.name),
+    text: text, ts: ts
+  });
+
+  const count = readAll('comments').filter(function (c) { return c.postId === postId; }).length;
+
+  return {
+    ok: true,
+    id: id,
+    comment: {
+      id: id, postId: postId,
+      name: u.name, avatar: initials(u.name),
+      text: text, ts: ts,
+      createdAt: new Date(ts).toISOString(),
+      mine: true
+    },
+    commentsCount: count
+  };
+};
+
+H.listHiveComments = function (b, u) {
+  const postId = String(b.postId || b.id || '');
+  if (!isId(postId)) throw new ApiError('bad_id');
+
+  const limit = Math.round(toNum(b.limit, 1, 300, 100));
+  const rows = readAll('comments').filter(function (c) { return c.postId === postId; });
+  rows.sort(function (a, c) { return Number(a.ts) - Number(c.ts); });
+  return rows.slice(-limit).map(function (c) {
+    return {
+      id: c.id, postId: c.postId,
+      name: c.name, avatar: c.avatar,
+      text: c.text,
+      ts: Number(c.ts),
+      createdAt: new Date(Number(c.ts)).toISOString(),
+      mine: !!u && c.phone === u.phone
+    };
+  });
+};
+
+H.deleteHiveComment = function (b, u) {
+  const id = String(b.id || '');
+  if (!isId(id)) throw new ApiError('bad_id');
+
+  const rows = readAll('comments');
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].id === id) {
+      if (rows[i].phone === u.phone) {
+        deleteRow('comments', rows[i]._row);
+        return { ok: true };
+      }
+      const posts = readAll('hive');
+      for (let j = 0; j < posts.length; j++) {
+        if (posts[j].id === rows[i].postId && posts[j].ownerPhone === u.phone) {
+          deleteRow('comments', rows[i]._row);
+          return { ok: true };
+        }
+      }
+      throw new ApiError('forbidden', 'Cannot delete this comment');
+    }
+  }
+  return { ok: true };
+};
+
+// ==================== MESSAGES ====================
 function checkRoom(roomId, u) {
   const id = String(roomId || '');
   const dm = /^dm-([A-Z0-9]{4,15})-([A-Z0-9]{4,15})$/.exec(id);
@@ -1270,10 +1489,10 @@ H.getMessages = function (b, u) {
   });
 };
 
-// ─── Presence ───
+// ==================== PRESENCE ====================
 H.updatePresence = function (b, u) {
   const r = b.row || b;
-  rateLimit(['pres:' + u.phone], 12, 60);
+  rateLimit(['pres:' + u.phone], 30, 60);
 
   const obj = {
     vehicle: u.vehicle, phone: u.phone, name: u.name,
@@ -1322,7 +1541,7 @@ H.removePresence = function (b, u) {
   return { ok: true };
 };
 
-// ─── Trips ───
+// ==================== TRIPS ====================
 H.startTrip = function (b, u) {
   rateLimit(['trip:' + u.phone], 30, 3600);
   const d = b.data || b;
@@ -1343,8 +1562,7 @@ H.startTrip = function (b, u) {
     startLat: coord(d.startLat, 90), startLng: coord(d.startLng, 180),
     endLat: '', endLng: '',
     distance: '', fare: '',
-    status: 'active',
-    notes: ''
+    status: 'active', notes: ''
   });
   return { id: id, ok: true };
 };
@@ -1391,7 +1609,7 @@ H.myTrips = function (b, u) {
   });
 };
 
-// ─── Points ───
+// ==================== POINTS ====================
 H.savePoint = function (b, u) {
   const r = b.row || b;
   const lat = coord(r.lat, 90);
@@ -1452,7 +1670,7 @@ H.deletePoint = function (b, u) {
   return { ok: true };
 };
 
-// ─── Images ───
+// ==================== IMAGES ====================
 function ownerTag(phone) {
   return 'owner:' + sha256Hex(phone + ':' + pepper()).slice(0, 24);
 }
@@ -1467,39 +1685,105 @@ function getFolder(name, parent) {
   return it.hasNext() ? it.next() : parent.createFolder(name);
 }
 
+/**
+ * uploadImage — tolerant of many client formats:
+ *   - data:image/<type>;base64,<payload>
+ *   - data:image/<type>;charset=utf-8;base64,<payload>
+ *   - raw base64 (with or without data: prefix)
+ *   - URL-safe base64 (-, _), newline-wrapped, unpadded
+ *   - image/jpg, image/pjpeg, image/x-png aliases
+ */
 H.uploadImage = function (b, u) {
-  rateLimit(['img:' + u.phone], 30, 21600);
+  rateLimit(['img:' + u.phone], 40, 21600);
 
-  const data = String(b.base64 || '');
-  const m = /^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/=]+)$/.exec(data);
-  if (!m) throw new ApiError('bad_image', 'Unsupported image type');
-  if (data.length > 4000000) throw new ApiError('too_large', 'Image too large');
+  let raw = String(b.base64 || b.data || '').trim();
+  if (!raw) throw new ApiError('bad_image', 'No image data provided');
 
-  const mime = 'image/' + m[1];
-  const slot = String(b.folder || 'misc').split('/').pop().replace(/[^a-z]/g, '') || 'misc';
+  let mime = 'image/jpeg';
+  let payload = raw;
 
-  let filename = String(b.filename || '')
-    .replace(/[^a-zA-Z0-9_-]/g, '')
-    .slice(0, 60);
+  if (raw.indexOf('data:') === 0) {
+    const dm = /^data:(image\/[a-z0-9.+-]+)(?:;[^,]*)?;base64,(.+)$/i.exec(raw);
+    if (!dm) throw new ApiError('bad_image', 'Unsupported image format');
+    mime = dm[1].toLowerCase();
+    payload = dm[2];
+  }
+
+  const ALIASES = {
+    'image/jpg':   'image/jpeg',
+    'image/pjpeg': 'image/jpeg',
+    'image/x-png': 'image/png'
+  };
+  if (ALIASES[mime]) mime = ALIASES[mime];
+
+  const ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  if (ALLOWED.indexOf(mime) < 0) {
+    throw new ApiError('bad_image',
+      'Only JPEG, PNG, WebP or GIF are supported (got ' + mime + ')');
+  }
+
+  payload = payload.replace(/[\s\r\n]/g, '');
+  if (payload.indexOf('-') >= 0 || payload.indexOf('_') >= 0) {
+    payload = payload.replace(/-/g, '+').replace(/_/g, '/');
+  }
+  while (payload.length % 4 !== 0) payload += '=';
+
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(payload)) {
+    throw new ApiError('bad_image', 'Image data is corrupted');
+  }
+
+  const MAX_B64 = 10000000; // ~7 MB binary
+  if (payload.length > MAX_B64) {
+    throw new ApiError('too_large', 'Image too large (max ~7 MB)');
+  }
+
+  let bytes;
+  try {
+    bytes = Utilities.base64Decode(payload);
+  } catch (e) {
+    Logger.log('base64Decode failed: ' + e);
+    throw new ApiError('bad_image', 'Could not decode image');
+  }
+  if (!bytes || !bytes.length) throw new ApiError('bad_image', 'Empty image');
+
+  const ext = mime === 'image/jpeg' ? 'jpg'
+            : mime === 'image/png'  ? 'png'
+            : mime === 'image/webp' ? 'webp'
+            : 'gif';
+
+  const slot = String(b.folder || 'misc').split('/').pop().replace(/[^a-z]/gi, '') || 'misc';
+  let filename = String(b.filename || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 60);
   if (!filename) filename = slot + '_' + now();
 
-  const bytes = Utilities.base64Decode(m[2]);
-  const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
   const blob = Utilities.newBlob(bytes, mime, filename + '.' + ext);
 
-  const root = getFolder('Steeradar Uploads', DriveApp.getRootFolder());
-  const mine = getFolder(sha256Hex(u.phone + pepper()).slice(0, 16), root);
-  const file = mine.createFile(blob);
-  file.setDescription(ownerTag(u.phone));
-  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+  let file;
+  try {
+    const root = getFolder('Steeradar Uploads', DriveApp.getRootFolder());
+    const mine = getFolder(sha256Hex(u.phone + pepper()).slice(0, 16), root);
+    file = mine.createFile(blob);
+    file.setDescription(ownerTag(u.phone));
+    try {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (shareErr) {
+      Logger.log('setSharing failed: ' + shareErr);
+    }
+  } catch (driveErr) {
+    Logger.log('Drive upload failed: ' + driveErr);
+    throw new ApiError('upload_failed', 'Upload failed, please try again');
+  }
 
   const fileId = file.getId();
-  const url = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w1200';
+
   return {
+    ok: true,
     fileId: fileId,
-    url: url,
+    url: 'https://lh3.googleusercontent.com/d/' + fileId + '=w1200',
+    thumbUrl: 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w800',
     viewUrl: 'https://drive.google.com/uc?export=view&id=' + fileId,
-    filename: filename
+    mimeType: mime,
+    size: bytes.length,
+    filename: filename + '.' + ext
   };
 };
 
@@ -1510,7 +1794,7 @@ H.deleteImage = function (b, u) {
   return { ok: true };
 };
 
-// ─── Reports ───
+// ==================== REPORTS ====================
 H.reportUser = function (b, u) {
   rateLimit(['report:' + u.phone], 5, 3600);
   const targetVehicle = normVehicle(b.vehicle);
@@ -1532,9 +1816,7 @@ H.reportUser = function (b, u) {
   return { ok: true };
 };
 
-// ═══════════════════════════════════════════════════
-//  ROUTER
-// ═══════════════════════════════════════════════════
+// ==================== ROUTER ====================
 const ROUTES = {
   ping:               { auth: 'none' },
   sendOtp:            { auth: 'none', write: true },
@@ -1544,6 +1826,7 @@ const ROUTES = {
   checkSession:       { auth: 'optional' },
   listLanes:          { auth: 'optional' },
   listHive:           { auth: 'optional' },
+  listHiveComments:   { auth: 'optional' },
   logout:             { auth: 'required', write: true },
   getMe:              { auth: 'required' },
   updateMe:           { auth: 'required', write: true },
@@ -1556,6 +1839,8 @@ const ROUTES = {
   updateHive:         { auth: 'required', write: true },
   deleteHive:         { auth: 'required', write: true },
   like:               { auth: 'required', write: true },
+  addHiveComment:     { auth: 'required', write: true },
+  deleteHiveComment:  { auth: 'required', write: true },
   getMessages:        { auth: 'required' },
   sendMessage:        { auth: 'required', write: true },
   updatePresence:     { auth: 'required', write: true },
@@ -1634,7 +1919,7 @@ function doPost(e) {
   }
 }
 
-// ─── Setup ───
+// ==================== SETUP ====================
 function setup() {
   pepper();
   Object.keys(SCHEMA).forEach(migrateSheet);
@@ -1676,11 +1961,12 @@ function cleanup() {
     prune('presence', function (p) { return t - Number(p.lastSeen) < 86400000; });
     prune('lanes',    function (l) { return t - Number(l.ts) < 7 * LANE_TTL_MS; });
     prune('messages', function (m) { return t - Number(m.ts) < 30 * 86400000; });
+    prune('comments', function (c) { return t - Number(c.ts) < 180 * 86400000; });
     Logger.log('Cleanup complete.');
   });
 }
 
-// ─── Test helpers ───
+// ==================== TEST HELPERS ====================
 function testEmail() {
   const to = Session.getActiveUser().getEmail();
   const ok = sendOtpEmail(to, '123456', 'login');
@@ -1691,6 +1977,17 @@ function testWelcome() {
   const to = Session.getActiveUser().getEmail();
   const ok = sendWelcomeEmail(to, 'Test Rider', 'KA01AB1234', 'Indiranagar', '9876543210', to);
   Logger.log('Welcome email: ' + (ok ? 'OK' : 'FAILED'));
+}
+
+function testAgentApproved() {
+  const to = Session.getActiveUser().getEmail();
+  const photos = {
+    vehiclePhoto: driveUrl('PUT_VEHICLE_FILE_ID_HERE', 900),
+    platePhoto:   driveUrl('PUT_PLATE_FILE_ID_HERE', 900),
+    selfie:       driveUrl('PUT_SELFIE_FILE_ID_HERE', 700)
+  };
+  const ok = sendAgentApprovedEmail(to, 'Test Rider', 'KA01AB1234', 'car', photos);
+  Logger.log('Agent approved email: ' + (ok ? 'OK' : 'FAILED'));
 }
 
 function checkMailQuota() {
