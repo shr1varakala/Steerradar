@@ -1715,3 +1715,258 @@ a:focus-visible {
     outline: 2px solid var(--primary);
     outline-offset: 2px;
 }
+
+/* ============================================================================
+   NEW FEATURES ADDITIONS (v14.0)
+   ----------------------------------------------------------------------------
+   Append this to the very bottom of css/style.css
+   Covers: Chat Avatars, Agent Profile Gallery, Negotiation Stepper,
+           Flex utilities for new modals
+   ============================================================================ */
+
+/* --- 1. FLEX UTILITY (used in new modals/content) --- */
+.flex-1 { flex: 1; }
+
+/* --- 2. CHAT MESSAGE REDESIGN (Avatar + Bubble) --- */
+/* 
+   IMPORTANT: Overrides the base .chat-message style for the new 
+   avatar-based layout. Specificity uses #hive-chat-view to win.
+*/
+#hive-chat-view .chat-message {
+    max-width: 85%;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    animation: messageIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#hive-chat-view .chat-message.agent {
+    align-self: flex-start;
+    flex-direction: row;
+}
+
+#hive-chat-view .chat-message.user {
+    align-self: flex-end;
+    flex-direction: row-reverse;
+}
+
+.chat-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    border: 2px solid var(--bg-card);
+    background: var(--bg-card);
+}
+
+.chat-bubble {
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: 13px;
+    line-height: 1.4;
+    word-wrap: break-word;
+    position: relative;
+}
+
+.chat-message.agent .chat-bubble {
+    background: var(--bg-card);
+    color: var(--text-main);
+    border: 1px solid var(--border-subtle);
+    border-top-left-radius: 4px;
+}
+
+.chat-message.user .chat-bubble {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+    color: #fff;
+    border-top-right-radius: 4px;
+}
+
+/* --- 3. CHAT HEADER AVATAR --- */
+.chat-header .user-avatar {
+    width: 32px !important;
+    height: 32px !important;
+    border-width: 2px;
+    flex-shrink: 0;
+    margin-right: 8px;
+}
+
+/* --- 4. AGENT PROFILE MODAL --- */
+#agent-profile-modal .modal-content {
+    /* Slightly taller to fit gallery + vehicle details */
+    max-height: 92vh;
+    overflow-y: auto;
+}
+
+#agent-profile-avatar {
+    box-shadow: 0 0 0 4px var(--primary-subtle), var(--shadow-md);
+    background: var(--bg-card);
+}
+
+#agent-profile-modal .tag-live {
+    font-size: 10px;
+    padding: 4px 10px;
+}
+
+#agent-profile-modal .tag-live i.fa-shield-check {
+    font-size: 9px;
+    margin-right: 2px;
+}
+
+/* --- 5. AGENT IMAGES GALLERY (Horizontal Scroll) --- */
+#agent-images-gallery {
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+}
+#agent-images-gallery::-webkit-scrollbar { display: none; }
+
+#agent-images-gallery > div {
+    scroll-snap-align: start;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#agent-images-gallery > div:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+/* --- 6. NEGOTIATION STEPPER (- digit +) --- */
+#negotiation-modal .btn-circle {
+    width: 52px;
+    height: 52px;
+    min-width: 52px;
+    font-size: 22px;
+    font-weight: 300;
+    background: var(--bg-card);
+    border: 1.5px solid var(--border-color);
+    color: var(--text-main);
+    line-height: 1;
+    border-radius: 50%;
+    transition: transform 0.15s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+#negotiation-modal .btn-circle:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+#negotiation-modal .btn-circle:active {
+    transform: scale(0.92);
+}
+
+#negotiation-modal .modal-title {
+    color: var(--text-main);
+}
+
+/* Line-through standard fare */
+#neg-standard-fare {
+    text-decoration: line-through;
+    text-decoration-thickness: 2px;
+    text-decoration-color: var(--text-dashed, var(--text-muted));
+}
+
+/* Offer display emphasis */
+#neg-offer-display {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -1px;
+}
+
+/* --- 7. BOTTOM SHEET SLIDE ANIMATION --- */
+#map-bottom-sheet .bottom-sheet {
+    animation: slideUpSheet 0.32s cubic-bezier(0.34, 1.2, 0.64, 1);
+}
+
+/* --- 8. BOTTOM SHEET: NEW CONTENT ADJUSTMENTS --- */
+#bottom-sheet-content .post-card {
+    /* Tighter cards inside bottom sheet */
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+#bottom-sheet-content .user-avatar {
+    border-width: 2px;
+}
+
+/* --- 9. TRIP BANNER BUTTON OVERRIDE (for new badge tags) --- */
+#bottom-sheet-content .tag {
+    font-size: 9px;
+}
+
+/* --- 10. NO-SCROLLBAR UTILITY (used in agent gallery) --- */
+.no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
+/* --- 11. GRID-2-COL WIDTH FIX (used in Agent Profile vehicle details) --- */
+.grid-2-col > div {
+    min-width: 0;
+    word-wrap: break-word;
+}
+
+/* --- 12. CUSTOM MAP PIN (Safety Net – in case section above was missed) --- */
+.custom-div-icon {
+    background: transparent !important;
+    border: none !important;
+}
+
+.custom-map-pin {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.custom-map-pin .pin-icon {
+    background: #fff;
+    padding: 6px;
+    border-radius: 50%;
+    border: 2px solid var(--primary);
+    font-size: 16px;
+    line-height: 1;
+    box-shadow: var(--shadow-md);
+    z-index: 2;
+    position: relative;
+}
+
+.custom-map-pin .pin-label {
+    background: var(--bg-elevated);
+    color: var(--text-main);
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    box-shadow: var(--shadow-sm);
+    margin-top: 3px;
+    z-index: 2;
+    position: relative;
+    white-space: nowrap;
+}
+
+[data-theme="dark"] .custom-map-pin .pin-icon {
+    background: var(--bg-elevated);
+}
+
+/* --- 13. RESPONSIVE TIGHTENING FOR NEW MODALS --- */
+@media (max-width: 380px) {
+    #negotiation-modal .btn-circle {
+        width: 46px;
+        height: 46px;
+        min-width: 46px;
+        font-size: 20px;
+    }
+    #neg-offer-display {
+        font-size: 26px !important;
+    }
+}
