@@ -1,10 +1,10 @@
 /**
  * ============================================================================
- * STEERADAR FRONTEND CONTROLLER (v13.0)
+ * STEERADAR FRONTEND CONTROLLER (v14.0)
  * ============================================================================
- * Compatible with index.html v13, map-ui.js v2, api.js v11
- * Features: theme toggle, map themes, road routing, bottom sheet,
- *           debounced presence, compressed+sequential uploads
+ * Compatible with index.html v14, map.js (patched), api.js v11, features.js
+ * Features: theme toggle, map themes, road routing, bottom sheet (via
+ *           features.js), avatar chat, debounced presence, uploads
  * ============================================================================
  */
 
@@ -21,6 +21,10 @@ const PRESENCE_INTERVAL = 20000;
 const PRESENCE_MIN_GAP = 15000;
 const CHAT_POLL_INTERVAL = 5000;
 const TOAST_DURATION = CONFIG.TOAST_DURATION_MS || 2400;
+
+// Fallback avatar for chat rendering
+const DEFAULT_AGENT_AVATAR = 'https://i.pravatar.cc/150?img=12';
+const DEFAULT_USER_AVATAR = 'https://i.pravatar.cc/150?img=11';
 
 // ============================================================================
 // 2. STATE
@@ -72,6 +76,7 @@ const DOM = {
     chatMessages: document.getElementById('chat-messages-container'),
     chatInput: document.getElementById('chat-input'),
     chatTitle: document.getElementById('chat-room-title'),
+    chatHeaderAvatar: document.getElementById('chat-header-avatar'), // ⭐ NEW
     adminApplicationList: document.getElementById('admin-application-list'),
     logoTrigger: document.getElementById('logo-trigger'),
     themeToggle: document.getElementById('toggle-theme'),
@@ -84,7 +89,7 @@ const DOM = {
 document.addEventListener('DOMContentLoaded', async () => {
     logger.init();
 
-    console.log('%c SteerRadar v13.0 booted ',
+    console.log('%c SteerRadar v14.0 booted ',
         'background:#00d4a0;color:#000;font-weight:800;padding:4px 10px;border-radius:4px;');
 
     applyTheme();
@@ -389,7 +394,7 @@ function updateUIForRole() {
 
     if (DOM.headerAvatar) {
         DOM.headerAvatar.src = avatar;
-        DOM.headerAvatar.onerror = () => { DOM.headerAvatar.src = 'https://i.pravatar.cc/150?img=11'; };
+        DOM.headerAvatar.onerror = () => { DOM.headerAvatar.src = DEFAULT_USER_AVATAR; };
     }
     if (DOM.profileName) DOM.profileName.textContent = state.user.name;
     if (DOM.profileRole) DOM.profileRole.textContent = state.user.role === 'agent' ? 'SteerAgent' : 'RearAgent';
@@ -556,6 +561,10 @@ function createLaneCardHTML(lane) {
         if (km > 0) distanceHTML = '<span class="distance-pill mt-2"><i class="fas fa-route"></i> ' + mapModule.formatDistance(km) + '</span>';
     }
 
+    // ⭐ CHANGED: pass avatar to openChat
+    const laneAvatar = lane.photo || DEFAULT_AGENT_AVATAR;
+    const ownerName = escapeHTML(lane.ownerName || 'Driver');
+
     return `
         <div class="lane-card">
             <div class="lane-header">
@@ -574,25 +583,30 @@ function createLaneCardHTML(lane) {
             </div>
             <div class="lane-footer">
                 <div class="driver-info">
-                    <img src="${lane.photo || 'https://i.pravatar.cc/150?img=12'}" class="driver-avatar" onerror="this.src='https://i.pravatar.cc/150?img=12'">
-                    <div><div class="driver-name">${escapeHTML(lane.ownerName || 'Driver')}</div><div class="driver-rating"><i class="fas fa-star"></i> SteerAgent</div></div>
+                    <img src="${laneAvatar}" class="driver-avatar" onerror="this.src='${DEFAULT_AGENT_AVATAR}'">
+                    <div><div class="driver-name">${ownerName}</div><div class="driver-rating"><i class="fas fa-star"></i> SteerAgent</div></div>
                 </div>
                 <div class="lane-actions">
                     <button class="btn btn-secondary btn-sm" onclick="showLaneBottomSheetById('${lane.id}')"><i class="fas fa-info-circle"></i></button>
-                    <button class="btn btn-secondary btn-sm" onclick="openChat('${lane.id}', '${escapeHTML(lane.ownerName || 'Driver')}')"><i class="fas fa-comment"></i></button>
+                    <button class="btn btn-secondary btn-sm" onclick="openChat('${lane.id}', '${ownerName}', '${laneAvatar}')"><i class="fas fa-comment"></i></button>
                     <button class="btn btn-primary btn-sm" onclick="requestSeat('${lane.id}')"><i class="fas fa-chair"></i></button>
                 </div>
             </div>
         </div>`;
 }
 
+// ⭐ CHANGED: Now calls showLaneDetails (from features.js)
 window.showLaneBottomSheetById = function (laneId) {
     const lane = state.allLanes.find(l => l.id === laneId);
     if (!lane) return showToast('Lane not found', 'error');
-    if (window.showLaneBottomSheet) {
+
+    // Prefer features.js (new bottom sheet with fare / negotiation)
+    if (typeof window.showLaneDetails === 'function') {
+        window.showLaneDetails(lane);
+    } else if (typeof window.showLaneBottomSheet === 'function') {
+        // Fallback to old map.js bottom sheet if features.js not loaded
         window.showLaneBottomSheet(lane);
     } else {
-        // Fallback if map-ui not loaded
         showLaneOnMap(laneId);
     }
 };
@@ -602,6 +616,7 @@ window.requestSeat = function (laneId) {
     showToast('Seat request sent! The driver will respond in chat.', 'success');
 };
 
+// ⭐ CHANGED: Now calls showLaneDetails
 window.showLaneOnMap = function (laneId) {
     const lane = state.allLanes.find(l => l.id === laneId);
     if (!lane) return;
@@ -609,7 +624,9 @@ window.showLaneOnMap = function (laneId) {
     switchTab('map');
     setTimeout(() => {
         mapModule.centerOn(lane.lat, lane.lng, 15);
-        if (window.showLaneBottomSheet) {
+        if (typeof window.showLaneDetails === 'function') {
+            window.showLaneDetails(lane);
+        } else if (typeof window.showLaneBottomSheet === 'function') {
             window.showLaneBottomSheet(lane);
         }
     }, 400);
@@ -705,12 +722,20 @@ window.toggleLike = async function (postId, currentLikes) {
 };
 
 // ============================================================================
-// 14. CHAT
+// 14. CHAT (avatar-based rendering)
 // ============================================================================
-window.openChat = async function (roomId, name) {
+
+// ⭐ CHANGED: accepts 3rd param (agent avatar) and sets header avatar
+window.openChat = async function (roomId, name, agentAvatar) {
     state.currentRoom = roomId;
     DOM.chatTitle.textContent = name || 'Hive Chat';
     DOM.chatView.classList.remove('hidden');
+
+    // Store the agent avatar for this session so loadMessages can use it
+    const avatarUrl = agentAvatar || DEFAULT_AGENT_AVATAR;
+    DOM.chatView.dataset.agentAvatar = avatarUrl;
+    if (DOM.chatHeaderAvatar) DOM.chatHeaderAvatar.src = avatarUrl;
+
     await loadMessages(roomId);
     if (state.intervals.chat) clearInterval(state.intervals.chat);
     state.intervals.chat = setInterval(() => loadMessages(roomId, true), CHAT_POLL_INTERVAL);
@@ -722,6 +747,7 @@ window.closeChat = function () {
     if (state.intervals.chat) { clearInterval(state.intervals.chat); state.intervals.chat = null; }
 };
 
+// ⭐ CHANGED: Renders avatar + bubble layout
 async function loadMessages(roomId, silent) {
     if (!silent) DOM.chatMessages.innerHTML = '<div class="text-center text-sub text-sm" style="padding:20px;"><div class="spinner"></div></div>';
     const messages = await api.getMessages(roomId);
@@ -731,19 +757,44 @@ async function loadMessages(roomId, silent) {
         DOM.chatMessages.innerHTML = '<div class="empty-state" style="padding:40px 20px;"><i class="fas fa-comment-dots"></i><p>No messages yet. Say hi! 👋</p></div>';
         return;
     }
-    const html = messages.map(m => '<div class="chat-message ' + (m.mine ? 'sent' : 'received') + '">' + escapeHTML(m.text) + '</div>').join('');
+
+    const myAvatar = (state.user && state.user.photo) || DEFAULT_USER_AVATAR;
+    const agentAvatar = DOM.chatView.dataset.agentAvatar || DEFAULT_AGENT_AVATAR;
+
+    const html = messages.map(m => {
+        const isUser = !!m.mine;
+        const avatarSrc = isUser ? myAvatar : agentAvatar;
+        return `
+            <div class="chat-message ${isUser ? 'user' : 'agent'}">
+                <img src="${avatarSrc}" class="chat-avatar" alt="Avatar" onerror="this.src='${isUser ? DEFAULT_USER_AVATAR : DEFAULT_AGENT_AVATAR}'">
+                <div>
+                    <div class="chat-bubble">${escapeHTML(m.text)}</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
     if (DOM.chatMessages.innerHTML !== html) {
         DOM.chatMessages.innerHTML = html;
         scrollToBottom();
     }
 }
 
+// ⭐ CHANGED: Renders user avatar + bubble
 window.sendMessage = async function () {
     const text = DOM.chatInput.value.trim();
     if (!text || !state.currentRoom) return;
     DOM.chatInput.value = '';
-    DOM.chatMessages.insertAdjacentHTML('beforeend', '<div class="chat-message sent">' + escapeHTML(text) + '</div>');
+
+    const myAvatar = (state.user && state.user.photo) || DEFAULT_USER_AVATAR;
+    DOM.chatMessages.insertAdjacentHTML('beforeend', `
+        <div class="chat-message user">
+            <img src="${myAvatar}" class="chat-avatar" alt="You" onerror="this.src='${DEFAULT_USER_AVATAR}'">
+            <div><div class="chat-bubble">${escapeHTML(text)}</div></div>
+        </div>
+    `);
     scrollToBottom();
+
     const res = await api.sendMessage({ roomId: state.currentRoom, text: text });
     if (!res) showToast('Failed to send message', 'error');
 };
@@ -800,12 +851,18 @@ async function handleCreateLane(e) {
             const upload = await api.uploadImage(b64, 'lanes', 'lane_' + title + '_' + state.user.phone + '_' + Date.now());
             if (upload && upload.url) photoUrl = upload.url;
         }
+
+        // ⭐ NEW: read departure time if present in the form
+        const startTimeInput = document.getElementById('lane-start-time');
+        const startTime = startTimeInput ? startTimeInput.value : '';
+
         const payload = {
             title: document.getElementById('lane-title').value.trim(),
             description: document.getElementById('lane-description').value.trim(),
             seats: document.getElementById('lane-seats').value,
             total: document.getElementById('lane-seats').value,
             vehicleType: document.getElementById('lane-vehicle-type').value,
+            startTime: startTime, // ⭐ NEW
             photo: photoUrl,
             lat: state.userLocation && state.userLocation.lat || CONFIG.DEFAULT_CENTER && CONFIG.DEFAULT_CENTER.lat || 17.3850,
             lng: state.userLocation && state.userLocation.lng || CONFIG.DEFAULT_CENTER && CONFIG.DEFAULT_CENTER.lng || 78.4867
@@ -1005,7 +1062,8 @@ function initMap() {
             const myPhone = state.user && state.user.phone || '';
             const ids = [myPhone, data.phone].sort();
             const roomId = 'dm-' + ids[0] + '-' + ids[1];
-            await openChat(roomId, data.name || 'SteerAgent');
+            // ⭐ CHANGED: pass avatar if available
+            await openChat(roomId, data.name || 'SteerAgent', data.avatar || DEFAULT_AGENT_AVATAR);
             if (data.action === 'quick' && data.text) {
                 DOM.chatInput.value = data.text;
                 setTimeout(() => sendMessage(), 400);
@@ -1284,6 +1342,7 @@ function showToast(message, type) {
         setTimeout(() => toast.remove(), 300);
     }, TOAST_DURATION);
 }
+window.showToast = showToast;
 
 // ============================================================================
 // 29. UTILITIES
@@ -1372,4 +1431,4 @@ window.toggleGhostMode = function () {
     if (checkbox) checkbox.click();
 };
 
-console.log('[app] All handlers initialized');
+console.log('[app] All handlers initialized (v14.0)');
