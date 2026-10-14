@@ -57,11 +57,26 @@
             </div>
 
             <div class="stories-container">
-                <div class="story-item"><div class="story-avatar story-add"><i class="fas fa-plus"></i></div><span class="story-name">Your story</span></div>
-                <div class="story-item"><div class="story-avatar"><img src="https://i.pravatar.cc/150?img=5"></div><span class="story-name">Ananya</span></div>
-                <div class="story-item"><div class="story-avatar"><img src="https://i.pravatar.cc/150?img=8"></div><span class="story-name">Rohit</span></div>
-                <div class="story-item"><div class="story-avatar"><img src="https://i.pravatar.cc/150?img=9"></div><span class="story-name">Meera</span></div>
-                <div class="story-item"><div class="story-avatar"><img src="https://i.pravatar.cc/150?img=15"></div><span class="story-name">Arjun</span></div>
+                <div class="story-item">
+                    <div class="story-avatar story-add"><i class="fas fa-plus"></i></div>
+                    <span class="story-name">Your story</span>
+                </div>
+                <div class="story-item">
+                    <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=5" alt="Ananya"></div>
+                    <span class="story-name">Ananya</span>
+                </div>
+                <div class="story-item">
+                    <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=8" alt="Rohit"></div>
+                    <span class="story-name">Rohit</span>
+                </div>
+                <div class="story-item">
+                    <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=9" alt="Meera"></div>
+                    <span class="story-name">Meera</span>
+                </div>
+                <div class="story-item">
+                    <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=15" alt="Arjun"></div>
+                    <span class="story-name">Arjun</span>
+                </div>
             </div>
 
             <div class="post-card greeting-card">
@@ -112,7 +127,7 @@
                 <!-- SEARCH RESULTS DROPDOWN -->
                 <div id="map-search-results" class="map-search-results hidden"></div>
 
-                <!-- TOP-RIGHT: LOCATE -->
+                <!-- TOP-RIGHT: LOCATE CONTROLS -->
                 <div class="map-top-right">
                     <button class="map-ctrl-btn" onclick="mapModule.recenter()" title="Recenter">
                         <i class="fas fa-location-arrow"></i>
@@ -122,14 +137,14 @@
                     </button>
                 </div>
 
-                <!-- MID-LEFT: GHOST -->
+                <!-- MID-LEFT: GHOST MODE (SteerAgent only) -->
                 <div class="map-mid-left">
                     <button id="ctrl-ghost" class="map-ctrl-btn hidden" onclick="toggleGhostMode()" title="Ghost mode">
                         <i class="fas fa-ghost"></i>
                     </button>
                 </div>
 
-                <!-- BOTTOM-LEFT: TRIP -->
+                <!-- BOTTOM-LEFT: TRIP BUTTON (SteerAgent only) -->
                 <div class="map-bottom-left">
                     <button id="ctrl-trip" class="map-ctrl-btn map-ctrl-primary hidden" onclick="toggleTrip()" title="Start/End Trip">
                         <i class="fas fa-play"></i>
@@ -180,8 +195,10 @@
                 <p class="text-sub">Your documents are being validated by an Admin. Check your email for updates.</p>
             </div>
 
+            <!-- APPEARANCE -->
             <div class="post-card">
                 <h3 class="section-subtitle">Appearance</h3>
+
                 <div class="setting-row">
                     <div>
                         <span style="font-weight:600;">UI Theme</span>
@@ -195,7 +212,8 @@
                         </span>
                     </label>
                 </div>
-                <div style="margin-top:14px;">
+
+                <div style="margin-top:16px;">
                     <span style="font-weight:600; font-size:14px;">Map Style</span>
                     <p class="text-sub" style="font-size:11px; margin-top:2px; margin-bottom:8px;">Choose how the map looks</p>
                     <select id="map-theme-select" class="form-input" onchange="handleMapThemeChange(this.value)">
@@ -207,6 +225,7 @@
                 </div>
             </div>
 
+            <!-- PREFERENCES -->
             <div class="post-card">
                 <h3 class="section-subtitle">Preferences</h3>
                 <div class="setting-row">
@@ -253,7 +272,7 @@
     </div>
 </div>
 
-<!-- ================= BOTTOM SHEET (for map marker details) ================= -->
+<!-- ================= BOTTOM SHEET (map marker details) ================= -->
 <div id="map-bottom-sheet" class="bottom-sheet-overlay hidden" onclick="closeBottomSheet(event)">
     <div class="bottom-sheet" onclick="event.stopPropagation()">
         <div class="bottom-sheet-handle" onclick="closeBottomSheet()"></div>
@@ -263,7 +282,7 @@
 
 <!-- ================= MODALS ================= -->
 
-<!-- Auth -->
+<!-- 1. Auth -->
 <div id="auth-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="auth-tabs">
@@ -288,7 +307,7 @@
     </div>
 </div>
 
-<!-- OTP -->
+<!-- 2. OTP -->
 <div id="otp-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header"><h2 class="modal-title">Verify Email</h2><button onclick="closeModal('otp-modal')" class="close-btn">&times;</button></div>
@@ -298,7 +317,7 @@
     </div>
 </div>
 
-<!-- SteerAgent Application -->
+<!-- 3. SteerAgent Application -->
 <div id="steer-agent-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header"><h2 class="modal-title">SteerAgent Application</h2><button onclick="closeModal('steer-agent-modal')" class="close-btn">&times;</button></div>
@@ -311,14 +330,14 @@
             <div class="form-group"><label>Driver's License Photo</label><input type="file" id="sa-license" class="form-input" accept="image/*" required></div>
             <div class="form-group"><label>Vehicle RC Photo</label><input type="file" id="sa-rc" class="form-input" accept="image/*" required></div>
             <div class="form-group"><label>Selfie with Vehicle</label><input type="file" id="sa-selfie" class="form-input" accept="image/*" required></div>
-            <div class="agreement-box"><strong>SteerAgent Agreement</strong><p>By checking this box, I confirm that all documents uploaded are authentic and belong to me. I agree to follow all traffic rules.</p></div>
+            <div class="agreement-box"><strong>SteerAgent Agreement</strong><p>By checking this box, I confirm that all documents uploaded are authentic and belong to me. I agree to follow all traffic rules, maintain my vehicle responsibly, and treat all RearAgents with respect. I understand that any violation may lead to immediate termination of my SteerAgent account.</p></div>
             <div class="flex align-center mt-2"><input type="checkbox" id="sa-agreement" required class="toggle-switch"><label for="sa-agreement" class="ml-2 text-sm">I agree to the SteerAgent Agreement.</label></div>
             <button type="submit" class="btn btn-primary w-full mt-4">Submit Application</button>
         </form>
     </div>
 </div>
 
-<!-- Create Lane -->
+<!-- 4. Create Lane -->
 <div id="create-lane-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header"><h2 class="modal-title">Create a Lane</h2><button onclick="closeModal('create-lane-modal')" class="close-btn">&times;</button></div>
@@ -335,12 +354,12 @@
     </div>
 </div>
 
-<!-- Create Hive Post -->
+<!-- 5. Create Hive Post -->
 <div id="create-hive-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header"><h2 class="modal-title">Create a Post</h2><button onclick="closeModal('create-hive-modal')" class="close-btn">&times;</button></div>
         <form id="create-hive-form">
-            <div class="form-group"><label>What's happening?</label><textarea id="hive-text" class="form-input" rows="3" required placeholder="Share an update..."></textarea></div>
+            <div class="form-group"><label>What's happening?</label><textarea id="hive-text" class="form-input" rows="3" required placeholder="Share an update with the community..."></textarea></div>
             <div class="form-group">
                 <label>Attach Media</label>
                 <div style="display:flex; gap:10px; margin-bottom:10px;">
@@ -348,14 +367,14 @@
                         <i class="fas fa-image"></i> Photo <input type="file" id="hive-photo" accept="image/*" style="display:none;" onchange="document.getElementById('hive-embed-url').value=''">
                     </label>
                 </div>
-                <input type="url" id="hive-embed-url" class="form-input" placeholder="Or paste YouTube/Instagram link..." oninput="document.getElementById('hive-photo').value=''">
+                <input type="url" id="hive-embed-url" class="form-input" placeholder="Or paste YouTube/Instagram link here..." oninput="document.getElementById('hive-photo').value=''">
             </div>
             <button type="submit" class="btn btn-primary w-full mt-4">Post to Hive</button>
         </form>
     </div>
 </div>
 
-<!-- Edit Profile -->
+<!-- 6. Edit Profile -->
 <div id="edit-profile-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header"><h2 class="modal-title">Edit Profile</h2><button onclick="closeModal('edit-profile-modal')" class="close-btn">&times;</button></div>
@@ -368,7 +387,7 @@
     </div>
 </div>
 
-<!-- Trips -->
+<!-- 7. Trips -->
 <div id="trips-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header"><h2 class="modal-title">My Trips</h2><button onclick="closeModal('trips-modal')" class="close-btn">&times;</button></div>
@@ -376,7 +395,7 @@
     </div>
 </div>
 
-<!-- Admin -->
+<!-- 8. Admin Panel -->
 <div id="admin-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header"><h2 class="modal-title">Admin Panel</h2><button onclick="closeModal('admin-modal')" class="close-btn">&times;</button></div>
@@ -385,11 +404,11 @@
     </div>
 </div>
 
-<!-- Report -->
+<!-- 9. Report Road -->
 <div id="report-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header"><h2 class="modal-title">Report Road Condition</h2><button onclick="closeModal('report-modal')" class="close-btn">&times;</button></div>
-        <p class="text-sub mb-3">Drop a quick alert on the map.</p>
+        <p class="text-sub mb-3">Drop a quick alert on the map for other drivers.</p>
         <div class="grid-2-col">
             <button class="btn btn-secondary" onclick="reportAlert('traffic')">🚧 Traffic</button>
             <button class="btn btn-secondary" onclick="reportAlert('pothole')">🕳️ Pothole</button>
@@ -399,7 +418,7 @@
     </div>
 </div>
 
-<!-- Save Location -->
+<!-- 10. Save Location -->
 <div id="location-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header"><h2 class="modal-title">Save Location</h2><button onclick="closeModal('location-modal')" class="close-btn">&times;</button></div>
@@ -408,7 +427,7 @@
     </div>
 </div>
 
-<!-- Debug Log -->
+<!-- 11. Debug Log -->
 <div id="log-modal" class="modal-overlay hidden">
     <div class="modal-content log-modal-content">
         <div class="modal-header"><h2 class="modal-title"><i class="fas fa-bug"></i> Debug Log</h2><button onclick="closeModal('log-modal')" class="close-btn">&times;</button></div>
@@ -425,6 +444,7 @@
 <script src="config.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module" src="js/app.js"></script>
+<script type="module" src="js/map-ui.js"></script>
 
 <script>
     // Unregister any old service workers
