@@ -1,16 +1,17 @@
 /**
  * ============================================================================
- * STEERADAR FRONTEND CONTROLLER (v14.1)
+ * STEERADAR FRONTEND CONTROLLER (v15.0)
  * ============================================================================
- * Compatible with index.html v14.1, map.js, api.js, features.js, logger.js
- * Changelog v14.1:
- *   + Full Hive post renderer (title, tags, media, actions)
- *   + Comments: openCommentModal, submitComment, loadPostComments, deleteComment
- *   + Post detail modal: openPostDetail (Instagram-style)
- *   + Share sheet: openShareModal + shareTo(whatsapp|twitter|...)
- *   + Deep-link hash router: #hive/<postId>
- *   + Hive photo preview reuses previewImage()
- *   All v14.0 behavior preserved.
+ * v15.0 additions:
+ *   + Map control bar: Refresh / Recenter / Enable GPS
+ *   + Long-press on map → Quick-pin sheet (lane/service/save/navigate/alert)
+ *   + Departure countdown preview + lane-card pill
+ *   + Avatar click → user profile modal
+ *   + ₹ payment request button (real UPI deep link)
+ *   + Fixed optimistic send failure (removes orphaned bubble)
+ *   + renderChatText() turns upi:// URLs into Pay buttons
+ *   + Listens to steeradar:longpress + steeradar:gps-denied
+ * All v14.1 behavior preserved.
  * ============================================================================
  */
 
@@ -29,7 +30,7 @@ const CHAT_POLL_INTERVAL = 5000;
 const TOAST_DURATION = CONFIG.TOAST_DURATION_MS || 2400;
 
 const DEFAULT_AGENT_AVATAR = 'https://i.pravatar.cc/150?img=12';
-const DEFAULT_USER_AVATAR = 'https://i.pravatar.cc/150?img=11';
+const DEFAULT_USER_AVATAR  = 'https://i.pravatar.cc/150?img=11';
 
 // ============================================================================
 // 2. STATE
@@ -56,13 +57,17 @@ const state = {
     intervals: { poll: null, presence: null, chat: null },
     isLoading: { lanes: false, hive: false, chat: false },
     isOnline: navigator.onLine,
-    // NEW
     currentPostId: null,
-    currentSharePostId: null
+    currentSharePostId: null,
+    // ⭐ v15
+    pendingQuickPin: null,
+    laneCountdownTimer: null,
+    profileTarget: null
 };
 
 let _lastPresenceSent = 0;
 let _presenceInFlight = false;
+let _laneCountdownInterval = null;
 
 // ============================================================================
 // 3. DOM CACHE
@@ -88,7 +93,8 @@ const DOM = {
     adminApplicationList: document.getElementById('admin-application-list'),
     logoTrigger: document.getElementById('logo-trigger'),
     themeToggle: document.getElementById('toggle-theme'),
-    mapThemeSelect: document.getElementById('map-theme-select')
+    mapThemeSelect: document.getElementById('map-theme-select'),
+    requestPaymentBtn: document.getElementById('request-payment-btn')
 };
 
 // ============================================================================
@@ -97,7 +103,7 @@ const DOM = {
 document.addEventListener('DOMContentLoaded', async () => {
     logger.init();
 
-    console.log('%c SteerRadar v14.1 booted ',
+    console.log('%c SteerRadar v15.0 booted ',
         'background:#00d4a0;color:#000;font-weight:800;padding:4px 10px;border-radius:4px;');
 
     applyTheme();
@@ -110,11 +116,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupNetworkHandlers();
     setupVisibilityHandlers();
     setupLogoLongPress();
+    setupMapEventListeners(); // ⭐ v15
     initMap();
 
     await checkSession();
 
-    // NEW: deep-link hash router
     handleHashRoute();
     window.addEventListener('hashchange', handleHashRoute);
 });
@@ -133,7 +139,6 @@ window.handleThemeToggle = function (input) {
     const theme = input.checked ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', theme);
     try { localStorage.setItem('steeradar-theme', theme); } catch (e) {}
-    console.log('[theme]', theme);
 };
 
 window.handleMapThemeChange = function (value) {
@@ -166,6 +171,7 @@ window.setMapFilter = function (type, btn) {
         container.innerHTML = `<div class="empty-state"><i class="fas fa-bus"></i><p>No lanes match this filter.</p></div>`;
     } else {
         container.innerHTML = filtered.map(createLaneCardHTML).join('');
+        attachLaneCountdowns();
     }
 };
 
@@ -186,6 +192,13 @@ function setupEventListeners() {
     DOM.chatInput?.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
     DOM.ctrlTrip?.addEventListener('click', toggleTrip);
 
+    // ⭐ v15: ₹ payment button
+    DOM.requestPaymentBtn?.addEventListener('click', handlePaymentRequest);
+
+    // ⭐ v15: live departure-countdown preview while creating a lane
+    document.getElementById('lane-start-time')?.addEventListener('input', updateLaneCountdownPreview);
+    document.getElementById('lane-start-time')?.addEventListener('change', updateLaneCountdownPreview);
+
     document.getElementById('lane-photo')?.addEventListener('change', (e) => previewImage(e, 'lane-photo-preview'));
     document.getElementById('hive-photo')?.addEventListener('change', (e) => previewImage(e, 'hive-photo-preview'));
     document.getElementById('edit-avatar')?.addEventListener('change', (e) => previewImage(e, 'edit-avatar-preview'));
@@ -196,8 +209,20 @@ function setupEventListeners() {
         });
     });
 
-    // NEW: comment submit button
     document.getElementById('comment-submit-btn')?.addEventListener('click', submitComment);
+}
+
+// ⭐ v15: global map event listeners
+function setupMapEventListeners() {
+    window.addEventListener('steeradar:longpress', (e) => {
+        openQuickPinSheet(e.detail.lat, e.detail.lng);
+    });
+    window.addEventListener('steeradar:gps-denied', (e) => {
+        showToast('Location unavailable: ' + (e.detail.reason || 'denied'), 'warning');
+    });
+    window.addEventListener('userLocationUpdate', (e) => {
+        state.userLocation = { lat: e.detail.lat, lng: e.detail.lng };
+    });
 }
 
 // ============================================================================
@@ -411,10 +436,14 @@ function updateUIForRole() {
     if (DOM.headerAvatar) {
         DOM.headerAvatar.src = avatar;
         DOM.headerAvatar.onerror = () => { DOM.headerAvatar.src = DEFAULT_USER_AVATAR; };
+        DOM.headerAvatar.dataset.userPhone = state.user.phone;
     }
     if (DOM.profileName) DOM.profileName.textContent = state.user.name;
     if (DOM.profileRole) DOM.profileRole.textContent = state.user.role === 'agent' ? 'SteerAgent' : 'RearAgent';
-    if (DOM.profileAvatar) DOM.profileAvatar.src = avatar;
+    if (DOM.profileAvatar) {
+        DOM.profileAvatar.src = avatar;
+        DOM.profileAvatar.dataset.userPhone = state.user.phone;
+    }
 
     toggleVisibility(DOM.adminBtn, state.user.isAdmin);
 
@@ -526,7 +555,7 @@ function refreshAll() {
 }
 
 // ============================================================================
-// 12. LANES (unchanged)
+// 12. LANES
 // ============================================================================
 async function loadLanes(silent) {
     if (!state.isOnline || state.isLoading.lanes) return;
@@ -550,6 +579,7 @@ async function loadLanes(silent) {
         return;
     }
     container.innerHTML = filtered.map(createLaneCardHTML).join('');
+    attachLaneCountdowns();
 }
 
 function getLanesContainer() {
@@ -577,6 +607,11 @@ function createLaneCardHTML(lane) {
         if (km > 0) distanceHTML = '<span class="distance-pill mt-2"><i class="fas fa-route"></i> ' + mapModule.formatDistance(km) + '</span>';
     }
 
+    // ⭐ v15: departure countdown pill
+    const countdownHTML = lane.startTime
+        ? '<span class="lane-countdown-pill" data-start-time="' + escapeHTML(lane.startTime) + '"><i class="fas fa-clock"></i> <span class="cd-text">--:--</span></span>'
+        : '';
+
     const laneAvatar = lane.photo || DEFAULT_AGENT_AVATAR;
     const ownerName = escapeHTML(lane.ownerName || 'Driver');
 
@@ -592,13 +627,14 @@ function createLaneCardHTML(lane) {
                     <div class="lane-tags">
                         <span class="tag tag-live">LIVE</span>
                         <span class="tag tag-fare">${escapeHTML(lane.vehicleType || 'Any')}</span>
+                        ${countdownHTML}
                         ${distanceHTML}
                     </div>
                 </div>
             </div>
             <div class="lane-footer">
                 <div class="driver-info">
-                    <img src="${laneAvatar}" class="driver-avatar" onerror="this.src='${DEFAULT_AGENT_AVATAR}'">
+                    <img src="${laneAvatar}" class="driver-avatar" data-user-phone="${escapeHTML(lane.ownerPhone || '')}" data-user-name="${ownerName}" data-user-vehicle="${escapeHTML(lane.vehicle || '')}" onerror="this.src='${DEFAULT_AGENT_AVATAR}'">
                     <div><div class="driver-name">${ownerName}</div><div class="driver-rating"><i class="fas fa-star"></i> SteerAgent</div></div>
                 </div>
                 <div class="lane-actions">
@@ -608,6 +644,104 @@ function createLaneCardHTML(lane) {
                 </div>
             </div>
         </div>`;
+}
+
+// ⭐ v15: start countdown intervals for all visible lanes
+function attachLaneCountdowns() {
+    if (_laneCountdownInterval) clearInterval(_laneCountdownInterval);
+    tickLaneCountdowns();
+    _laneCountdownInterval = setInterval(tickLaneCountdowns, 30000); // every 30 s is plenty
+}
+
+function tickLaneCountdowns() {
+    document.querySelectorAll('.lane-countdown-pill').forEach(el => {
+        const startTime = el.dataset.startTime;
+        if (!startTime) return;
+        const mins = minutesUntil(startTime);
+        const txt = el.querySelector('.cd-text');
+        if (!txt) return;
+
+        if (mins == null) { el.style.display = 'none'; return; }
+        if (mins <= 0) {
+            el.classList.add('expired');
+            txt.textContent = 'Departed';
+        } else if (mins < 5) {
+            el.classList.add('urgent');
+            el.classList.remove('expired');
+            txt.textContent = 'in ' + mins + 'm';
+        } else if (mins < 60) {
+            el.classList.remove('urgent', 'expired');
+            txt.textContent = 'in ' + mins + 'm';
+        } else {
+            const h = Math.floor(mins / 60);
+            const m = mins % 60;
+            el.classList.remove('urgent', 'expired');
+            txt.textContent = 'in ' + h + 'h' + (m ? ' ' + m + 'm' : '');
+        }
+    });
+}
+
+/**
+ * Parse an "HH:MM" time string (today, local time).
+ * Returns the number of minutes from now, or null if invalid.
+ */
+function minutesUntil(timeStr) {
+    if (!timeStr || typeof timeStr !== 'string') return null;
+    const m = /^(\d{1,2}):(\d{2})$/.exec(timeStr.trim());
+    if (!m) return null;
+    const hh = parseInt(m[1], 10);
+    const mm = parseInt(m[2], 10);
+    if (!isFinite(hh) || !isFinite(mm) || hh > 23 || mm > 59) return null;
+
+    const now = new Date();
+    const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+    let diffMin = Math.round((target.getTime() - now.getTime()) / 60000);
+
+    // If the time has already passed by more than 4 hours, assume it's tomorrow
+    if (diffMin < -240) diffMin += 24 * 60;
+
+    return diffMin;
+}
+
+// ⭐ v15: live preview inside the Create-Lane modal
+function updateLaneCountdownPreview() {
+    const input = document.getElementById('lane-start-time');
+    const box = document.getElementById('lane-countdown-preview');
+    const valEl = document.getElementById('lane-countdown-value');
+    const hintEl = document.getElementById('lane-countdown-hint');
+    if (!input || !box || !valEl || !hintEl) return;
+
+    const v = input.value;
+    if (!v) {
+        box.classList.add('hidden');
+        return;
+    }
+    box.classList.remove('hidden', 'urgent', 'soon', 'expired');
+
+    const mins = minutesUntil(v);
+    if (mins == null) {
+        valEl.textContent = '--:--';
+        hintEl.textContent = 'Invalid time';
+        return;
+    }
+    if (mins <= 0) {
+        box.classList.add('expired');
+        valEl.textContent = 'Departed';
+        hintEl.textContent = 'Choose a later time';
+    } else if (mins < 5) {
+        box.classList.add('urgent');
+        valEl.textContent = mins + 'm';
+        hintEl.textContent = 'Leaving very soon!';
+    } else if (mins < 60) {
+        if (mins < 30) box.classList.add('soon');
+        valEl.textContent = mins + 'm';
+        hintEl.textContent = 'Departs in ' + mins + ' minutes';
+    } else {
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        valEl.textContent = h + 'h' + (m ? ' ' + m + 'm' : '');
+        hintEl.textContent = 'Departs today';
+    }
 }
 
 window.showLaneBottomSheetById = function (laneId) {
@@ -636,8 +770,6 @@ window.showLaneOnMap = function (laneId) {
         mapModule.centerOn(lane.lat, lane.lng, 15);
         if (typeof window.showLaneDetails === 'function') {
             window.showLaneDetails(lane);
-        } else if (typeof window.showLaneBottomSheet === 'function') {
-            window.showLaneBottomSheet(lane);
         }
     }, 400);
 };
@@ -651,7 +783,7 @@ window.navigateToLane = function (laneId) {
 };
 
 // ============================================================================
-// 13. HIVE — v14.1 FULL RENDERER
+// 13. HIVE
 // ============================================================================
 async function loadHive(silent) {
     if (!state.isOnline || state.isLoading.hive) return;
@@ -685,12 +817,6 @@ function getHiveContainer() {
     return container;
 }
 
-/**
- * Build media block from a post — supports:
- *   - uploaded image (post.photo)
- *   - YouTube embed (post.mediaType === 'youtube')
- *   - Instagram embed (post.mediaType === 'instagram')
- */
 function buildPostMediaHTML(post) {
     if (post.photo) {
         return '<div class="post-image"><img src="' + post.photo + '" alt="Post" loading="lazy" onerror="this.onerror=null; this.style.display=\'none\';"></div>';
@@ -706,7 +832,6 @@ function buildPostMediaHTML(post) {
     if (post.mediaType === 'video') {
         return '<div class="post-image"><video controls playsinline src="' + post.mediaUrl + '"></video></div>';
     }
-    // Generic link
     return '<a href="' + escapeHTML(post.mediaUrl) + '" target="_blank" rel="noopener" class="text-sub text-xs" style="display:block; margin-bottom:10px;"><i class="fas fa-link"></i> ' + escapeHTML(post.mediaUrl) + '</a>';
 }
 
@@ -728,7 +853,7 @@ function createHivePostHTML(post) {
     return `
         <div class="post-card" data-post-id="${post.id}">
             <div class="post-header">
-                <img src="${avatar}" class="driver-avatar avatar-lg" onerror="this.src='${DEFAULT_AGENT_AVATAR}'" onclick="openPostDetail('${post.id}')">
+                <img src="${avatar}" class="driver-avatar avatar-lg" data-user-name="${escapeHTML(post.ownerName || post.name || '')}" onerror="this.src='${DEFAULT_AGENT_AVATAR}'" onclick="openPostDetail('${post.id}')">
                 <div>
                     <div class="post-user">${escapeHTML(post.ownerName || post.name || 'User')} <i class="fas fa-check-circle verified-badge"></i></div>
                     <div class="post-time">${timeAgo(post.createdAt)}</div>
@@ -757,7 +882,6 @@ function createHivePostHTML(post) {
 
 window.filterHiveByTag = function (tag) {
     showToast('Filtering by #' + tag, 'info');
-    // Optional: implement actual filter. For now just a toast.
 };
 
 window.toggleLike = async function (postId, currentLikes) {
@@ -776,7 +900,7 @@ window.toggleLike = async function (postId, currentLikes) {
 };
 
 // ============================================================================
-// 13b. HIVE COMMENTS — v14.1
+// 13b. HIVE COMMENTS
 // ============================================================================
 window.openCommentModal = function (postId) {
     if (!state.user) return showToast('Sign in to comment', 'error');
@@ -802,14 +926,12 @@ window.submitComment = async function () {
             window.closeModal('comment-modal');
             document.getElementById('comment-text').value = '';
 
-            // Update inline count on feed card
             const card = document.querySelector('.post-card[data-post-id="' + postId + '"]');
             if (card) {
                 const cnt = card.querySelector('[data-action="comment"] span');
                 if (cnt) cnt.textContent = res.commentsCount != null ? res.commentsCount : (parseInt(cnt.textContent || '0') + 1);
             }
 
-            // If detail modal is open for this post, refresh comments
             const detailModal = document.getElementById('post-detail-modal');
             if (detailModal && !detailModal.classList.contains('hidden') && state.currentPostId === postId) {
                 loadPostComments(postId);
@@ -825,7 +947,7 @@ window.submitComment = async function () {
 };
 
 // ============================================================================
-// 13c. POST DETAIL MODAL — v14.1
+// 13c. POST DETAIL MODAL
 // ============================================================================
 window.openPostDetail = async function (postId) {
     state.currentPostId = postId;
@@ -875,7 +997,6 @@ window.openPostDetail = async function (postId) {
     window.openModal('post-detail-modal');
     loadPostComments(postId);
 
-    // Update URL for deep link
     try {
         const base = location.href.split('#')[0];
         history.replaceState(null, '', base + '#hive/' + encodeURIComponent(postId));
@@ -920,7 +1041,6 @@ window.deleteComment = async function (commentId, postId) {
         if (res && res.ok !== false) {
             showToast('Comment deleted', 'success');
             loadPostComments(postId);
-            // Also decrement count in feed
             const card = document.querySelector('.post-card[data-post-id="' + postId + '"]');
             if (card) {
                 const cnt = card.querySelector('[data-action="comment"] span');
@@ -933,7 +1053,7 @@ window.deleteComment = async function (commentId, postId) {
 };
 
 // ============================================================================
-// 13d. SHARE SHEET — v14.1
+// 13d. SHARE SHEET
 // ============================================================================
 window.openShareModal = function (postId) {
     state.currentSharePostId = postId;
@@ -964,7 +1084,6 @@ window.shareTo = async function (platform) {
             await navigator.clipboard.writeText(url);
             showToast('Link copied!', 'success');
         } catch (e) {
-            // Fallback
             const ta = document.createElement('textarea');
             ta.value = url;
             document.body.appendChild(ta);
@@ -991,7 +1110,7 @@ window.shareTo = async function (platform) {
 };
 
 // ============================================================================
-// 13e. HASH ROUTER — v14.1
+// 13e. HASH ROUTER
 // ============================================================================
 function handleHashRoute() {
     const hash = location.hash || '';
@@ -999,7 +1118,6 @@ function handleHashRoute() {
     if (m) {
         const postId = decodeURIComponent(m[1]);
         if (state.activeTab !== 'hive') window.switchTab('hive');
-        // Wait for hive list to render, then open detail
         setTimeout(() => {
             if (!state.hive.length) return;
             window.openPostDetail(postId);
@@ -1008,7 +1126,7 @@ function handleHashRoute() {
 }
 
 // ============================================================================
-// 14. CHAT (avatar-based rendering)
+// 14. CHAT
 // ============================================================================
 window.openChat = async function (roomId, name, agentAvatar) {
     state.currentRoom = roomId;
@@ -1017,7 +1135,10 @@ window.openChat = async function (roomId, name, agentAvatar) {
 
     const avatarUrl = agentAvatar || DEFAULT_AGENT_AVATAR;
     DOM.chatView.dataset.agentAvatar = avatarUrl;
-    if (DOM.chatHeaderAvatar) DOM.chatHeaderAvatar.src = avatarUrl;
+    if (DOM.chatHeaderAvatar) {
+        DOM.chatHeaderAvatar.src = avatarUrl;
+        DOM.chatHeaderAvatar.dataset.userPhone = ''; // unknown here, set by features.js if known
+    }
 
     await loadMessages(roomId);
     if (state.intervals.chat) clearInterval(state.intervals.chat);
@@ -1029,6 +1150,17 @@ window.closeChat = function () {
     DOM.chatView.classList.add('hidden');
     if (state.intervals.chat) { clearInterval(state.intervals.chat); state.intervals.chat = null; }
 };
+
+/**
+ * ⭐ v15: renders chat text and turns upi://pay URLs into Pay buttons.
+ */
+function renderChatText(text) {
+    const safe = escapeHTML(text);
+    const re = /(upi:\/\/pay\?[^\s<]+)/g;
+    return safe.replace(re, function (m) {
+        return '<br><a href="' + m + '" class="upi-pay-link">₹ Pay via UPI</a>';
+    });
+}
 
 async function loadMessages(roomId, silent) {
     if (!silent) DOM.chatMessages.innerHTML = '<div class="text-center text-sub text-sm" style="padding:20px;"><div class="spinner"></div></div>';
@@ -1046,11 +1178,14 @@ async function loadMessages(roomId, silent) {
     const html = messages.map(m => {
         const isUser = !!m.mine;
         const avatarSrc = isUser ? myAvatar : agentAvatar;
+        const avatarAttrs = isUser
+            ? 'data-user-phone="' + escapeHTML((state.user && state.user.phone) || '') + '"'
+            : '';
         return `
             <div class="chat-message ${isUser ? 'user' : 'agent'}">
-                <img src="${avatarSrc}" class="chat-avatar" alt="Avatar" onerror="this.src='${isUser ? DEFAULT_USER_AVATAR : DEFAULT_AGENT_AVATAR}'">
+                <img src="${avatarSrc}" class="chat-avatar" ${avatarAttrs} alt="Avatar" onerror="this.src='${isUser ? DEFAULT_USER_AVATAR : DEFAULT_AGENT_AVATAR}'">
                 <div>
-                    <div class="chat-bubble">${escapeHTML(m.text)}</div>
+                    <div class="chat-bubble">${renderChatText(m.text || '')}</div>
                 </div>
             </div>
         `;
@@ -1062,25 +1197,69 @@ async function loadMessages(roomId, silent) {
     }
 }
 
+/**
+ * ⭐ v15: sendMessage removes the optimistic bubble on failure.
+ */
 window.sendMessage = async function () {
     const text = DOM.chatInput.value.trim();
     if (!text || !state.currentRoom) return;
     DOM.chatInput.value = '';
 
     const myAvatar = (state.user && state.user.photo) || DEFAULT_USER_AVATAR;
+    const tempId = 'tmp-' + Date.now();
     DOM.chatMessages.insertAdjacentHTML('beforeend', `
-        <div class="chat-message user">
+        <div class="chat-message user" id="${tempId}">
             <img src="${myAvatar}" class="chat-avatar" alt="You" onerror="this.src='${DEFAULT_USER_AVATAR}'">
-            <div><div class="chat-bubble">${escapeHTML(text)}</div></div>
+            <div><div class="chat-bubble">${renderChatText(text)}</div></div>
         </div>
     `);
     scrollToBottom();
 
     const res = await api.sendMessage({ roomId: state.currentRoom, text: text });
-    if (!res) showToast('Failed to send message', 'error');
+
+    if (!res) {
+        const el = document.getElementById(tempId);
+        if (el) el.remove();
+        showToast('Failed to send — ' + (api.lastError || 'check connection'), 'error');
+    }
 };
 
 function scrollToBottom() { DOM.chatMessages.scrollTop = DOM.chatMessages.scrollHeight; }
+
+// ⭐ v15: ₹ payment request
+async function handlePaymentRequest() {
+    if (!state.user) return showToast('Sign in first', 'error');
+    if (!state.currentRoom) return showToast('Open a chat first', 'warning');
+
+    const input = prompt('Amount to request (₹):', '50');
+    if (input == null) return;
+    const amount = Math.floor(Number(input));
+    if (!isFinite(amount) || amount <= 0 || amount > 10000) {
+        return showToast('Enter a valid amount (₹1 – ₹10,000)', 'error');
+    }
+
+    const me = state.user;
+    const upi = (me.upiId || me.upiQrId || '').trim();
+
+    let text;
+    if (upi) {
+        const pn = encodeURIComponent(me.name || 'SteerAgent');
+        const tn = encodeURIComponent('SteerRadar ride');
+        const link = `upi://pay?pa=${encodeURIComponent(upi)}&pn=${pn}&am=${amount}&cu=INR&tn=${tn}`;
+        text = `💰 Payment request: ₹${amount}\n${link}`;
+    } else {
+        text = `💰 Payment request: ₹${amount}\n(Add your UPI ID in Profile → Edit Profile so the other rider can pay in one tap.)`;
+    }
+
+    try {
+        const res = await api.sendMessage({ roomId: state.currentRoom, text: text });
+        if (!res) throw new Error(api.lastError || 'Send failed');
+        showToast('Payment request sent', 'success');
+        await loadMessages(state.currentRoom, true);
+    } catch (err) {
+        showToast(err.message || 'Failed to send', 'error');
+    }
+}
 
 // ============================================================================
 // 15. NEIGHBORHOOD CHAT
@@ -1136,9 +1315,23 @@ async function handleCreateLane(e) {
         const startTimeInput = document.getElementById('lane-start-time');
         const startTime = startTimeInput ? startTimeInput.value : '';
 
+        // Split title "A to B" into from/to for backend semantics
+        const titleStr = document.getElementById('lane-title').value.trim();
+        const descStr  = document.getElementById('lane-description').value.trim();
+        let from = '', to = '';
+        const m = /\s+to\s+/i.exec(titleStr);
+        if (m) {
+            from = titleStr.slice(0, m.index).trim();
+            to   = titleStr.slice(m.index + m[0].length).trim();
+        }
+
         const payload = {
-            title: document.getElementById('lane-title').value.trim(),
-            description: document.getElementById('lane-description').value.trim(),
+            id: 'L-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            title: titleStr,
+            description: descStr,
+            from: from,
+            to: to,
+            via: '',
             seats: document.getElementById('lane-seats').value,
             total: document.getElementById('lane-seats').value,
             vehicleType: document.getElementById('lane-vehicle-type').value,
@@ -1152,6 +1345,8 @@ async function handleCreateLane(e) {
             showToast('Lane posted!', 'success');
             closeModal('create-lane-modal');
             e.target.reset();
+            const prev = document.getElementById('lane-countdown-preview');
+            if (prev) prev.classList.add('hidden');
             loadLanes();
         } else throw new Error(api.lastError || 'Failed');
     } catch (err) { showToast(err.message, 'error'); }
@@ -1159,7 +1354,7 @@ async function handleCreateLane(e) {
 }
 
 // ============================================================================
-// 18. CREATE HIVE POST — v14.1 (title + tags + preview)
+// 18. CREATE HIVE POST
 // ============================================================================
 async function handleCreateHivePost(e) {
     e.preventDefault();
@@ -1192,7 +1387,6 @@ async function handleCreateHivePost(e) {
             else mediaType = 'link';
         }
 
-        // Tags: comma-separated → pipe-separated for backend
         const tags = tagsRaw
             .split(',')
             .map(t => t.trim().replace(/^#/, ''))
@@ -1224,7 +1418,7 @@ async function handleCreateHivePost(e) {
 }
 
 // ============================================================================
-// 19. EDIT PROFILE (unchanged)
+// 19. EDIT PROFILE
 // ============================================================================
 window.openEditProfile = function () {
     if (!state.user) return;
@@ -1266,7 +1460,7 @@ async function handleEditProfile(e) {
 }
 
 // ============================================================================
-// 20. STEERAGENT APPLICATION (unchanged)
+// 20. STEERAGENT APPLICATION
 // ============================================================================
 async function handleSteerAgentApplication(e) {
     e.preventDefault();
@@ -1323,7 +1517,7 @@ async function handleSteerAgentApplication(e) {
 }
 
 // ============================================================================
-// 21. ADMIN (unchanged)
+// 21. ADMIN
 // ============================================================================
 window.loadAdminApplications = async function () {
     if (!state.user || !state.user.isAdmin) return;
@@ -1357,7 +1551,7 @@ window.handleAdminAction = async function (uid, approve) {
 };
 
 // ============================================================================
-// 22. MAP (unchanged)
+// 22. MAP
 // ============================================================================
 function initMap() {
     mapModule.init('map', handleMapClick, {
@@ -1425,6 +1619,34 @@ function handleMapClick(lat, lng) {
     }
 }
 
+// ⭐ v15: map control bar actions
+window.refreshMap = function () {
+    if (mapModule && mapModule.refreshSize) {
+        mapModule.refreshSize();
+        showToast('Map refreshed', 'info');
+    }
+};
+
+window.recenterMap = async function () {
+    if (!mapModule || !mapModule.recenter) return;
+    showToast('Locating you…', 'info');
+    try {
+        await mapModule.recenter();
+    } catch (e) {
+        // The gps-denied event already fired; nothing more to do
+    }
+};
+
+window.enableGPS = function () {
+    if (!mapModule || !mapModule.toggleLiveLocation) return;
+    const r = mapModule.toggleLiveLocation();
+    if (r && r.tracking) {
+        showToast('GPS tracking ON', 'success');
+    } else {
+        showToast('GPS tracking OFF', 'info');
+    }
+};
+
 window.navigateToPoint = function (lat, lng) {
     const fromLat = state.userLocation && state.userLocation.lat || null;
     const fromLng = state.userLocation && state.userLocation.lng || null;
@@ -1451,7 +1673,165 @@ async function loadSavedPoints() {
 }
 
 // ============================================================================
-// 23. LIVE PRESENCE (unchanged)
+// 22b. QUICK PIN SHEET
+// ============================================================================
+window.openQuickPinSheet = function (lat, lng) {
+    state.pendingQuickPin = { lat: lat, lng: lng };
+    const coordsEl = document.getElementById('qp-coords');
+    if (coordsEl) {
+        coordsEl.textContent = lat.toFixed(5) + ', ' + lng.toFixed(5);
+    }
+    const sheet = document.getElementById('quick-pin-sheet');
+    if (!sheet) return;
+    sheet.classList.remove('hidden');
+};
+
+window.closeQuickPinSheet = function (event) {
+    if (event && event.target !== event.currentTarget && !event.target.closest('.bottom-sheet-handle')) return;
+    const sheet = document.getElementById('quick-pin-sheet');
+    if (sheet) sheet.classList.add('hidden');
+    state.pendingQuickPin = null;
+};
+
+window.quickPinAction = function (action) {
+    const pin = state.pendingQuickPin;
+    if (!pin) return showToast('No pin selected', 'error');
+
+    window.closeQuickPinSheet();
+
+    if (action === 'lane') {
+        if (!state.user) return showToast('Sign in first', 'error');
+        if (state.user.role !== 'agent') return showToast('Only SteerAgents can create lanes', 'warning');
+        // Prefill with the pin location so the new lane is dropped there
+        state.userLocation = { lat: pin.lat, lng: pin.lng };
+        openModal('create-lane-modal');
+        return;
+    }
+
+    if (action === 'service') {
+        if (!state.user) return showToast('Sign in first', 'error');
+        const label = prompt('Service name (e.g. Petrol pump, Tyre shop, Mechanic):', '');
+        if (!label) return;
+        api.savePoint({
+            label: label,
+            note: '',
+            category: 'service',
+            lat: pin.lat,
+            lng: pin.lng,
+            shared: true
+        }).then(function (r) {
+            if (r) {
+                showToast('Service added', 'success');
+                if (mapModule.addTempMarker) {
+                    mapModule.addTempMarker(pin.lat, pin.lng, label);
+                }
+            } else {
+                showToast('Failed to save service', 'error');
+            }
+        });
+        return;
+    }
+
+    if (action === 'save') {
+        state.pendingLocation = { lat: pin.lat, lng: pin.lng };
+        const nameInput = document.getElementById('location-name');
+        if (nameInput) nameInput.value = '';
+        openModal('location-modal');
+        return;
+    }
+
+    if (action === 'navigate') {
+        const fromLat = state.userLocation && state.userLocation.lat || null;
+        const fromLng = state.userLocation && state.userLocation.lng || null;
+        mapModule.navigateTo(pin.lat, pin.lng, fromLat, fromLng);
+        return;
+    }
+
+    if (action === 'alert') {
+        openModal('report-modal');
+        return;
+    }
+};
+
+// ============================================================================
+// 22c. USER PROFILE (opened by clicking any avatar)
+// ============================================================================
+window.openUserProfileFromElement = function (el, phone) {
+    if (!el) return;
+    const data = {
+        phone: phone || el.dataset.userPhone || '',
+        name: el.dataset.userName || el.alt || 'User',
+        avatar: el.src || DEFAULT_AGENT_AVATAR,
+        vehicle: el.dataset.userVehicle || '',
+        vehicleType: el.dataset.userVehicleType || '',
+        community: el.dataset.userCommunity || '',
+        rating: el.dataset.userRating || '5.0'
+    };
+    showUserProfile(data);
+};
+
+function showUserProfile(data) {
+    state.profileTarget = data;
+
+    const setText = function (id, val) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = val || '—';
+    };
+    const setSrc = function (id, src, fallback) {
+        const el = document.getElementById(id);
+        if (el) {
+            el.src = src || fallback;
+            el.onerror = function () { this.src = fallback; };
+        }
+    };
+
+    setSrc('user-profile-avatar', data.avatar, DEFAULT_AGENT_AVATAR);
+    setText('user-profile-name', data.name || 'User');
+
+    const roleEl = document.getElementById('user-profile-role');
+    if (roleEl) {
+        roleEl.textContent = data.vehicle ? 'SteerAgent' : 'RearAgent';
+        roleEl.style.background = data.vehicle ? 'var(--primary)' : '';
+        roleEl.style.color = data.vehicle ? '#fff' : '';
+    }
+
+    setText('user-profile-vehicle', data.vehicle || '—');
+    setText('user-profile-vehicle-type', data.vehicleType || '—');
+    setText('user-profile-community', data.community || '—');
+    setText('user-profile-rating', '⭐ ' + (data.rating || '5.0'));
+
+    // Message button hidden if there is no phone to message
+    const msgBtn = document.querySelector('#user-profile-modal .btn-primary');
+    if (msgBtn) {
+        if (data.phone && state.user && data.phone !== state.user.phone) {
+            msgBtn.style.display = '';
+        } else {
+            msgBtn.style.display = 'none';
+        }
+    }
+
+    openModal('user-profile-modal');
+}
+
+window.messageUserFromProfile = function () {
+    const t = state.profileTarget;
+    if (!t || !t.phone) return showToast('Cannot message this user', 'warning');
+    if (!state.user) return showToast('Sign in first', 'error');
+
+    const me = state.user;
+    const myId = String((me.vehicle || me.phone || '')).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const theirId = String(t.vehicle || t.phone || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!myId || !theirId) return showToast('Missing vehicle/phone on one side', 'warning');
+
+    const ids = [myId, theirId].sort();
+    const roomId = 'dm-' + ids[0] + '-' + ids[1];
+
+    closeModal('user-profile-modal');
+    openChat(roomId, t.name || 'User', t.avatar || DEFAULT_AGENT_AVATAR);
+};
+
+// ============================================================================
+// 23. LIVE PRESENCE
 // ============================================================================
 async function broadcastPresence() {
     if (!state.user || state.user.role !== 'agent' || state.user.ghostMode) return;
@@ -1491,7 +1871,7 @@ async function broadcastPresence() {
 }
 
 // ============================================================================
-// 24. ALERTS (unchanged)
+// 24. ALERTS
 // ============================================================================
 window.reportAlert = async function (type) {
     if (!state.user) return showToast('Sign in first', 'error');
@@ -1506,7 +1886,7 @@ window.reportAlert = async function (type) {
 };
 
 // ============================================================================
-// 25. GHOST MODE (unchanged)
+// 25. GHOST MODE
 // ============================================================================
 async function handleGhostModeToggle(e) {
     const isGhost = e.target.checked;
@@ -1527,7 +1907,7 @@ async function handleGhostModeToggle(e) {
 }
 
 // ============================================================================
-// 26. TRIPS (unchanged)
+// 26. TRIPS
 // ============================================================================
 window.toggleTrip = async function () {
     if (!state.user || state.user.role !== 'agent') return showToast('Only SteerAgents can start trips', 'warning');
@@ -1606,7 +1986,7 @@ window.loadTrips = async function () {
 };
 
 // ============================================================================
-// 27. IMAGE PREVIEW (unchanged)
+// 27. IMAGE PREVIEW
 // ============================================================================
 function previewImage(event, previewId) {
     const file = event.target.files && event.target.files[0];
@@ -1624,7 +2004,7 @@ function previewImage(event, previewId) {
 }
 
 // ============================================================================
-// 28. TOASTS (unchanged)
+// 28. TOASTS
 // ============================================================================
 function showToast(message, type) {
     type = type || 'info';
@@ -1647,7 +2027,7 @@ function showToast(message, type) {
 window.showToast = showToast;
 
 // ============================================================================
-// 29. UTILITIES (unchanged)
+// 29. UTILITIES
 // ============================================================================
 function compressImage(file, maxDim, quality) {
     maxDim = maxDim || 800;
@@ -1733,4 +2113,4 @@ window.toggleGhostMode = function () {
     if (checkbox) checkbox.click();
 };
 
-console.log('[app] All handlers initialized (v14.1)');
+console.log('[app] All handlers initialized (v15.0)');
