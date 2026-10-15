@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>SteerRadar · Community Ride Network</title>
 
-    <!-- ============ SHARE / SOCIAL META (new) ============ -->
+    <!-- ============ SHARE / SOCIAL META ============ -->
     <meta name="description" content="SteerRadar — Real-time community rides, live driver lanes, and the Hive social feed. Ride together, save money, build trust.">
     <meta property="og:site_name" content="SteerRadar">
     <meta property="og:title" content="SteerRadar · Community Ride Network">
@@ -114,7 +114,6 @@
             </button>
 
             <h3 class="section-subtitle">Local posts</h3>
-            <!-- Posts are injected here by features.js -->
         </section>
 
         <!-- 3. MAP -->
@@ -142,10 +141,16 @@
                 <!-- SEARCH RESULTS DROPDOWN -->
                 <div id="map-search-results" class="map-search-results hidden"></div>
 
-                <!-- TOP-RIGHT: LOCATE -->
+                <!-- ⭐ NEW: MAP CONTROL BAR (top-right stack) -->
                 <div class="map-top-right">
-                    <button class="map-ctrl-btn" onclick="mapModule.locateUser(true)" title="My location">
+                    <button class="map-ctrl-btn" onclick="mapModule.refreshSize()" title="Refresh map">
+                        <i class="fas fa-rotate"></i>
+                    </button>
+                    <button class="map-ctrl-btn" onclick="recenterMap()" title="Recenter on me">
                         <i class="fas fa-crosshairs"></i>
+                    </button>
+                    <button class="map-ctrl-btn" id="btn-enable-gps" onclick="enableGPS()" title="Enable GPS">
+                        <i class="fas fa-location-dot"></i>
                     </button>
                 </div>
 
@@ -278,18 +283,52 @@
         </header>
         <div id="chat-messages-container" class="chat-container"></div>
         <div class="chat-input-area">
-            <button id="request-payment-btn" class="btn-primary btn-circle btn-sm"><i class="fas fa-rupee-sign"></i></button>
+            <button id="request-payment-btn" class="btn-primary btn-circle btn-sm" title="Request payment" style="font-size:18px; font-weight:800;">₹</button>
             <input type="text" id="chat-input" placeholder="Type a message..." class="chat-input">
             <button onclick="sendMessage()" class="btn-primary btn-circle btn-sm"><i class="fas fa-paper-plane"></i></button>
         </div>
     </div>
 </div>
 
-<!-- ================= BOTTOM SHEET ================= -->
+<!-- ================= BOTTOM SHEET (map marker details) ================= -->
 <div id="map-bottom-sheet" class="bottom-sheet-overlay hidden" onclick="closeBottomSheet(event)">
     <div class="bottom-sheet" onclick="event.stopPropagation()">
         <div class="bottom-sheet-handle" onclick="closeBottomSheet()"></div>
         <div id="bottom-sheet-content" class="bottom-sheet-content"></div>
+    </div>
+</div>
+
+<!-- ⭐ NEW: QUICK PIN SHEET (opens on long-press of map) -->
+<div id="quick-pin-sheet" class="bottom-sheet-overlay hidden" onclick="closeQuickPinSheet(event)">
+    <div class="bottom-sheet" onclick="event.stopPropagation()">
+        <div class="bottom-sheet-handle" onclick="closeQuickPinSheet()"></div>
+
+        <div class="flex justify-between align-center mb-3">
+            <div>
+                <h3 style="font-weight:800; font-size:16px;">Drop a pin here</h3>
+                <p class="text-sub text-xs" id="qp-coords">—</p>
+            </div>
+            <button onclick="closeQuickPinSheet()" class="icon-btn"><i class="fas fa-times"></i></button>
+        </div>
+
+        <div class="grid-2-col" style="margin-bottom:12px;">
+            <button class="btn btn-secondary" onclick="quickPinAction('lane')">
+                <i class="fas fa-route"></i> Create Lane
+            </button>
+            <button class="btn btn-secondary" onclick="quickPinAction('service')">
+                <i class="fas fa-tools"></i> Add Service
+            </button>
+            <button class="btn btn-secondary" onclick="quickPinAction('save')">
+                <i class="fas fa-bookmark"></i> Save Pin
+            </button>
+            <button class="btn btn-secondary" onclick="quickPinAction('navigate')">
+                <i class="fas fa-diamond-turn-right"></i> Navigate
+            </button>
+        </div>
+
+        <button class="btn btn-primary w-full" onclick="quickPinAction('alert')">
+            <i class="fas fa-triangle-exclamation"></i> Report Road Issue
+        </button>
     </div>
 </div>
 
@@ -350,7 +389,7 @@
     </div>
 </div>
 
-<!-- 4. Create Lane -->
+<!-- 4. Create Lane (with departure time + ⭐ live countdown preview) -->
 <div id="create-lane-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header"><h2 class="modal-title">Create a Lane</h2><button onclick="closeModal('create-lane-modal')" class="close-btn">&times;</button></div>
@@ -362,13 +401,21 @@
                 <option value="car">Car</option><option value="bike">Bike</option><option value="auto">Auto</option><option value="bus">Bus</option>
             </select></div>
             <div class="form-group"><label>Departure Time</label><input type="time" id="lane-start-time" class="form-input" required></div>
+
+            <!-- ⭐ NEW: live countdown preview -->
+            <div id="lane-countdown-preview" class="qp-countdown hidden">
+                <div class="qp-countdown-label">Departs in</div>
+                <div class="qp-countdown-value" id="lane-countdown-value">--:--</div>
+                <div class="qp-countdown-hint" id="lane-countdown-hint">Set a departure time</div>
+            </div>
+
             <div class="form-group"><label>Vehicle Photo (Optional)</label><input type="file" id="lane-photo" class="form-input" accept="image/*"></div>
             <button type="submit" class="btn btn-primary w-full mt-4">Post Lane</button>
         </form>
     </div>
 </div>
 
-<!-- 5. Create Hive Post (expanded: title + tags + preview) -->
+<!-- 5. Create Hive Post -->
 <div id="create-hive-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header"><h2 class="modal-title">Create a Post</h2><button onclick="closeModal('create-hive-modal')" class="close-btn">&times;</button></div>
@@ -477,18 +524,16 @@
         <div class="post-card mb-3">
             <h3 class="section-subtitle mb-2"><i class="fas fa-car"></i> Vehicle Details</h3>
             <div class="grid-2-col text-sm">
-                <div><span class="text-sub">Model</span><br><strong id="agent-vehicle-model">Maruti Ertiga</strong></div>
-                <div><span class="text-sub">Color</span><br><strong id="agent-vehicle-color">White</strong></div>
-                <div class="col-span-2 mt-2"><span class="text-sub">License Plate</span><br><strong id="agent-vehicle-plate" style="letter-spacing: 1px;">KA-01-AB-1234</strong></div>
+                <div><span class="text-sub">Model</span><br><strong id="agent-vehicle-model">—</strong></div>
+                <div><span class="text-sub">Color</span><br><strong id="agent-vehicle-color">—</strong></div>
+                <div class="col-span-2 mt-2"><span class="text-sub">License Plate</span><br><strong id="agent-vehicle-plate" style="letter-spacing: 1px;">N/A</strong></div>
             </div>
         </div>
 
         <div class="mb-4">
             <h3 class="section-subtitle mb-2">Vehicle & Verification Images</h3>
             <p class="text-sub text-xs mb-2">Images uploaded by the agent during application.</p>
-            <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar" id="agent-images-gallery">
-                <!-- Injected by features.js -->
-            </div>
+            <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar" id="agent-images-gallery"></div>
         </div>
 
         <button class="btn btn-primary w-full" onclick="closeModal('agent-profile-modal'); openChatFromAgentProfile();">
@@ -523,23 +568,19 @@
     </div>
 </div>
 
-<!-- ============ NEW: 14. POST DETAIL (Instagram-style) ============ -->
+<!-- 14. POST DETAIL -->
 <div id="post-detail-modal" class="modal-overlay hidden">
     <div class="modal-content" style="max-height: 92vh; overflow-y: auto;">
         <div class="modal-header">
             <h2 class="modal-title">Post</h2>
             <button onclick="closeModal('post-detail-modal')" class="close-btn">&times;</button>
         </div>
-        <div id="post-detail-content">
-            <!-- Injected by features.js: author, media, caption, actions -->
-        </div>
-        <div id="post-detail-comments" style="margin-top:16px;">
-            <!-- Injected by features.js: list of comments -->
-        </div>
+        <div id="post-detail-content"></div>
+        <div id="post-detail-comments" style="margin-top:16px;"></div>
     </div>
 </div>
 
-<!-- ============ NEW: 15. COMMENT MODAL ============ -->
+<!-- 15. COMMENT MODAL -->
 <div id="comment-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header">
@@ -556,7 +597,7 @@
     </div>
 </div>
 
-<!-- ============ NEW: 16. SHARE MODAL ============ -->
+<!-- 16. SHARE MODAL -->
 <div id="share-modal" class="modal-overlay hidden">
     <div class="modal-content">
         <div class="modal-header">
@@ -611,12 +652,39 @@
     </div>
 </div>
 
+<!-- 17. USER PROFILE MODAL (opens when any avatar is clicked) -->
+<div id="user-profile-modal" class="modal-overlay hidden">
+    <div class="modal-content" style="max-height: 92vh; overflow-y: auto;">
+        <div class="modal-header">
+            <h2 class="modal-title">Profile</h2>
+            <button onclick="closeModal('user-profile-modal')" class="close-btn">&times;</button>
+        </div>
+        <div id="user-profile-content">
+            <div class="flex flex-col items-center">
+                <img id="user-profile-avatar" src="https://i.pravatar.cc/150?img=12" alt="User" class="profile-avatar" style="width: 80px; height: 80px;">
+                <h3 id="user-profile-name" class="profile-name mt-2">User</h3>
+                <span class="tag tag-live mt-1" id="user-profile-role">RearAgent</span>
+            </div>
+            <div class="post-card mt-3">
+                <div class="grid-2-col text-sm">
+                    <div><span class="text-sub">Vehicle</span><br><strong id="user-profile-vehicle">—</strong></div>
+                    <div><span class="text-sub">Type</span><br><strong id="user-profile-vehicle-type">—</strong></div>
+                    <div class="col-span-2 mt-2"><span class="text-sub">Community</span><br><strong id="user-profile-community">—</strong></div>
+                    <div class="col-span-2 mt-2"><span class="text-sub">Rating</span><br><strong id="user-profile-rating">—</strong></div>
+                </div>
+            </div>
+            <button class="btn btn-primary w-full mt-3" onclick="messageUserFromProfile()">
+                <i class="fas fa-comment"></i> Message
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- ================= SCRIPTS ================= -->
 <script src="config.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module" src="js/app.js"></script>
 <script type="module" src="js/features.js"></script>
-<!-- NOTE: map.js is auto-loaded via `import` inside app.js -->
 
 <script>
     // Unregister old service workers
@@ -638,7 +706,7 @@
         } catch (e) {}
     })();
 
-    // ============ NEW: Hive photo preview ============
+    // Hive photo preview
     (function() {
         document.addEventListener('change', function(e) {
             if (e.target && e.target.id === 'hive-photo') {
@@ -650,11 +718,32 @@
                 const url = URL.createObjectURL(f);
                 const img = document.createElement('img');
                 img.src = url;
-                img.style.cssText = 'max-width:100%; border-radius:10px; border:1px solid var(--border);';
+                img.style.cssText = 'max-width:100%; border-radius:10px; border:1px solid var(--border-color);';
                 prev.appendChild(img);
             }
         });
     })();
+
+    // ⭐ GLOBAL: any avatar click → open that user's profile
+    // Detects <img class="user-avatar"> or <img class="driver-avatar"> and
+    // uses data-user-phone if present.
+    document.addEventListener('click', function (e) {
+        const img = e.target.closest && e.target.closest('img.user-avatar, img.driver-avatar, img.chat-avatar');
+        if (!img) return;
+        // Skip the header avatar (that one switches tabs)
+        if (img.id === 'header-avatar') return;
+        // Skip the chat header avatar
+        if (img.id === 'chat-header-avatar') return;
+        // Skip agent profile avatar inside the modal (would be recursive)
+        if (img.id === 'agent-profile-avatar') return;
+
+        const phone = img.dataset.userPhone || img.dataset.phone || '';
+        if (typeof window.openUserProfileFromElement === 'function') {
+            e.preventDefault();
+            e.stopPropagation();
+            window.openUserProfileFromElement(img, phone);
+        }
+    }, true);
 </script>
 </body>
 </html>
