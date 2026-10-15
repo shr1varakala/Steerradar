@@ -1,110 +1,95 @@
-/* ============================================================================
-   STEERADAR API CLIENT (v3.0)
-   ============================================================================
-   Pairs with backend code.gs v8.11+
-   Features:
-     • Universal request() with token, timeout, retry
-     • Auto-clears session on 401-family errors (fires 'steeradar:signout')
-     • Exposes every backend action as a typed method
-     • uploadImage accepts File | Blob | dataURL | base64
-     • Client-side image compression for large files
-     • Hive comments + share-URL helpers
-   ============================================================================ */
+/**
+ * ============================================================================
+ * STEERADAR API CLIENT (v2.0)
+ * ============================================================================
+ * Matches app.js v14.1 call signatures exactly.
+ *
+ * Public:
+ *   • getters: api.token, api.phone, api.user, api.lastError
+ *   • setSession({ phone, token, user })   — saves to localStorage
+ *   • clearSession()                       — wipes session
+ *   • checkSession()                       — { valid, user } | { valid:false }
+ *   • login({ phone, password })           — { token, phone, user } or { error }
+ *   • sendOtp(phone, email, purpose)       — { ok, sentTo } or { ok:false, error }
+ *   • verifyOtp(phone, code)               — { ok, verified } or { ok:false, error }
+ *   • register(data)                       — { token, phone, user } or { error }
+ *   • uploadImage(base64, folder, name)    — { url, fileId, ... }
+ *   • like(kind, id, delta)                — { likes, liked }
+ *   • addHiveComment / listHiveComments / deleteHiveComment
+ *   • … all other backend actions
+ * ============================================================================
+ */
 
 import { logger } from './logger.js';
 
 /* --------------------------- CONFIG --------------------------- */
-// Prefer window.CONFIG if config.js exports one, else fallback.
 const SHEET_API_URL =
-  (typeof window !== 'undefined' && window.CONFIG && window.CONFIG.SHEET_API_URL) ||
+  (typeof window !== 'undefined' && window.STEERADAR && window.STEERADAR.SHEET_API_URL) ||
   'https://script.google.com/macros/s/AKfycbwcATMRSXU-LogPvBJtvS2n6oxVa51o9d48F29s9FUe96C0X-VaV_KgqHvEVLNICfzr/exec';
 
-const DEFAULT_TIMEOUT_MS = 30000;
+const TIMEOUT_MS        = 25000;
 const UPLOAD_TIMEOUT_MS = 90000;
-const MAX_UPLOAD_B64_CHARS = 10000000; // matches backend limit (~7 MB binary)
-const COMPRESS_THRESHOLD_BYTES = 3 * 1024 * 1024; // compress files > 3 MB
-const COMPRESS_MAX_DIMENSION = 1600; // longest edge after compression
-const COMPRESS_QUALITY = 0.82;
 
 /* --------------------------- SESSION --------------------------- */
-const STORAGE_KEYS = {
+const KEYS = {
   phone: 'steeradar-phone',
   token: 'steeradar-token',
   user:  'steeradar-user'
 };
 
-let session = {
-  phone: '',
-  token: '',
-  user: null
-};
+let _session = { phone: '', token: '', user: null };
+let _lastError = '';
 
-function loadSession() {
+function _loadSession() {
   try {
-    session.phone = localStorage.getItem(STORAGE_KEYS.phone) || '';
-    session.token = localStorage.getItem(STORAGE_KEYS.token) || '';
-    const u = localStorage.getItem(STORAGE_KEYS.user);
-    session.user = u ? JSON.parse(u) : null;
+    _session.phone = localStorage.getItem(KEYS.phone) || '';
+    _session.token = localStorage.getItem(KEYS.token) || '';
+    const u = localStorage.getItem(KEYS.user);
+    _session.user = u ? JSON.parse(u) : null;
   } catch (e) {
-    session = { phone: '', token: '', user: null };
+    _session = { phone: '', token: '', user: null };
   }
 }
 
-function saveSession() {
+function _saveSession() {
   try {
-    if (session.phone) localStorage.setItem(STORAGE_KEYS.phone, session.phone);
-    else localStorage.removeItem(STORAGE_KEYS.phone);
+    if (_session.phone) localStorage.setItem(KEYS.phone, _session.phone);
+    else                localStorage.removeItem(KEYS.phone);
 
-    if (session.token) localStorage.setItem(STORAGE_KEYS.token, session.token);
-    else localStorage.removeItem(STORAGE_KEYS.token);
+    if (_session.token) localStorage.setItem(KEYS.token, _session.token);
+    else                localStorage.removeItem(KEYS.token);
 
-    if (session.user) localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(session.user));
-    else localStorage.removeItem(STORAGE_KEYS.user);
+    if (_session.user)  localStorage.setItem(KEYS.user, JSON.stringify(_session.user));
+    else                localStorage.removeItem(KEYS.user);
   } catch (e) {
     logger.warn('saveSession failed:', e);
   }
 }
 
-function clearSession(opts) {
-  session.phone = '';
-  session.token = '';
-  session.user = null;
-  saveSession();
-
-  // Notify the app
+function _clearSessionSilent(reason) {
+  _session = { phone: '', token: '', user: null };
+  _saveSession();
   try {
-    window.dispatchEvent(new CustomEvent('steeradar:signout', { detail: opts || {} }));
+    window.dispatchEvent(new CustomEvent('steeradar:signout', {
+      detail: { reason: reason || 'unknown' }
+    }));
   } catch (e) {}
-
-  logger.info('Session cleared', opts && opts.reason ? '(' + opts.reason + ')' : '');
 }
 
-loadSession();
-
-/* --------------------------- ERRORS --------------------------- */
-export class ApiError extends Error {
-  constructor(code, message, retry) {
-    super(message || code || 'Request failed');
-    this.name = 'ApiError';
-    this.code = code || 'server_error';
-    this.retry = retry || null;
-  }
-}
+_loadSession();
 
 /* --------------------------- REQUEST CORE --------------------------- */
-async function request(action, params, opts) {
+/**
+ * Send a POST to the Apps Script endpoint.
+ * Returns { data } on success, or { error, message, retry } on failure.
+ */
+async function _request(action, params, opts) {
   opts = opts || {};
-  const timeout = opts.timeout || DEFAULT_TIMEOUT_MS;
-  const retry = opts.retry !== false && action !== 'ping';
+  const timeout = opts.timeout || TIMEOUT_MS;
 
-  const body = Object.assign(
-    { action: action },
-    params || {}
-  );
-
-  // Attach session credentials when available
-  if (session.phone) body.phone = session.phone;
-  if (session.token) body.token = session.token;
+  const body = Object.assign({ action: action }, params || {});
+  if (_session.phone) body.phone = _session.phone;
+  if (_session.token) body.token = _session.token;
 
   const controller = new AbortController();
   const timer = setTimeout(function () { controller.abort(); }, timeout);
@@ -113,7 +98,7 @@ async function request(action, params, opts) {
   try {
     res = await fetch(SHEET_API_URL, {
       method: 'POST',
-      // text/plain avoids preflight — Apps Script requires this
+      // text/plain avoids CORS preflight (Apps Script requires this)
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -121,132 +106,41 @@ async function request(action, params, opts) {
     });
   } catch (e) {
     clearTimeout(timer);
-    if (e && e.name === 'AbortError') {
-      throw new ApiError('timeout', 'Request timed out', 2);
-    }
-    throw new ApiError('network', e && e.message ? e.message : 'Network error', 3);
+    const msg = (e && e.name === 'AbortError') ? 'Request timed out' : ((e && e.message) || 'Network error');
+    _lastError = msg;
+    logger.warn('API ' + action + ' → ' + msg);
+    return { error: 'network', message: msg };
   }
   clearTimeout(timer);
 
   if (!res.ok) {
-    // Try a single retry on 5xx
-    if (retry && res.status >= 500) {
-      logger.warn('API ' + action + ' HTTP ' + res.status + ' — retrying once');
-      return request(action, params, Object.assign({}, opts, { retry: false, timeout: timeout }));
-    }
-    throw new ApiError('http_' + res.status, 'Server error (' + res.status + ')', 5);
+    _lastError = 'Server error ' + res.status;
+    logger.warn('API ' + action + ' → HTTP ' + res.status);
+    return { error: 'http_' + res.status, message: _lastError };
   }
 
   let json;
   try {
     json = await res.json();
   } catch (e) {
-    throw new ApiError('bad_json', 'Malformed server response');
+    _lastError = 'Malformed server response';
+    return { error: 'bad_json', message: _lastError };
   }
 
-  // Backend returns { data } or { error, message, retry }
-  if (json && typeof json === 'object' && 'error' in json && json.error) {
-    const err = new ApiError(json.error, json.message || json.error, json.retry || null);
+  // Backend returns either { data: <handler return> } or { error, message, retry }
+  if (json && json.error) {
+    _lastError = json.message || json.error;
 
-    // Auto-clear session on auth failures
-    if (err.code === 'unauthorized' || err.code === 'bad_session' || err.code === 'banned') {
-      clearSession({ reason: err.code });
+    // Auto-clear on auth failures
+    if (json.error === 'unauthorized' || json.error === 'bad_session' || json.error === 'banned') {
+      logger.warn('Session invalid — signing out (' + json.error + ')');
+      _clearSessionSilent(json.error);
     }
 
-    // Auto-retry on rate_limited with wait
-    if (retry && err.code === 'rate_limited' && json.retry && json.retry <= 5) {
-      await new Promise(function (r) { setTimeout(r, json.retry * 1000); });
-      return request(action, params, Object.assign({}, opts, { retry: false }));
-    }
-
-    throw err;
+    return { error: json.error, message: json.message || json.error, retry: json.retry };
   }
 
-  return json && Object.prototype.hasOwnProperty.call(json, 'data') ? json.data : json;
-}
-
-/* --------------------------- IMAGE HELPERS --------------------------- */
-function fileToDataUrl(file) {
-  return new Promise(function (resolve, reject) {
-    const reader = new FileReader();
-    reader.onload = function () { resolve(String(reader.result || '')); };
-    reader.onerror = function () { reject(new Error('Failed to read file')); };
-    reader.readAsDataURL(file);
-  });
-}
-
-function loadImage(src) {
-  return new Promise(function (resolve, reject) {
-    const img = new Image();
-    img.onload = function () { resolve(img); };
-    img.onerror = function () { reject(new Error('Image decode failed')); };
-    img.src = src;
-  });
-}
-
-/**
- * Compress an image file client-side if it's too large.
- * Returns a data URL (JPEG unless source was PNG with transparency).
- */
-async function compressImageFile(file) {
-  const dataUrl = await fileToDataUrl(file);
-
-  // Under threshold — just return as-is
-  if (file.size <= COMPRESS_THRESHOLD_BYTES) return dataUrl;
-
-  const img = await loadImage(dataUrl);
-  const maxDim = COMPRESS_MAX_DIMENSION;
-  let w = img.naturalWidth;
-  let h = img.naturalHeight;
-
-  if (w > maxDim || h > maxDim) {
-    if (w >= h) { h = Math.round(h * (maxDim / w)); w = maxDim; }
-    else        { w = Math.round(w * (maxDim / h)); h = maxDim; }
-  }
-
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0, w, h);
-
-  // Use PNG only if source was PNG (preserve transparency), else JPEG
-  const isPng = file.type === 'image/png';
-  const outType = isPng ? 'image/png' : 'image/jpeg';
-  const outQuality = isPng ? undefined : COMPRESS_QUALITY;
-
-  let compressed = canvas.toDataURL(outType, outQuality);
-
-  // If compression somehow made it bigger, fall back to original
-  if (compressed.length > dataUrl.length) return dataUrl;
-
-  logger.info('Compressed ' + Math.round(file.size / 1024) + ' KB → ' +
-              Math.round(compressed.length / 1024) + ' KB');
-  return compressed;
-}
-
-/**
- * Normalize an image source to a dataURL ready for upload.
- * Accepts: File | Blob | HTMLImageElement | dataURL string | raw base64
- */
-async function normalizeImageSource(src) {
-  if (!src) throw new ApiError('bad_image', 'No image provided');
-
-  // File / Blob
-  if (src instanceof File || src instanceof Blob) {
-    return compressImageFile(src);
-  }
-
-  // data URL / raw base64
-  if (typeof src === 'string') {
-    if (src.indexOf('data:') === 0) return src;
-    // Assume raw base64 → wrap as JPEG
-    if (/^[A-Za-z0-9+/=\s]+$/.test(src)) {
-      return 'data:image/jpeg;base64,' + src.replace(/\s+/g, '');
-    }
-  }
-
-  throw new ApiError('bad_image', 'Unsupported image source');
+  return { data: (json && 'data' in json) ? json.data : json };
 }
 
 /* ============================================================================
@@ -255,304 +149,299 @@ async function normalizeImageSource(src) {
 
 export const api = {
 
-  /* ---------------- SESSION ---------------- */
-  getSession: function () { return Object.assign({}, session); },
-  getPhone:   function () { return session.phone; },
-  getToken:   function () { return session.token; },
-  getUser:    function () { return session.user; },
-  isSignedIn: function () { return !!(session.phone && session.token); },
+  /* ---------- Session getters (app.js reads these as properties) ---------- */
+  get token()     { return _session.token; },
+  get phone()     { return _session.phone; },
+  get user()      { return _session.user; },
+  get lastError() { return _lastError; },
 
-  setSession: function (phone, token, user) {
-    session.phone = String(phone || '');
-    session.token = String(token || '');
-    session.user = user || null;
-    saveSession();
+  setSession: function (s) {
+    if (!s) return;
+    if (s.phone !== undefined) _session.phone = String(s.phone || '');
+    if (s.token !== undefined) _session.token = String(s.token || '');
+    if (s.user  !== undefined) _session.user  = s.user || null;
+    _saveSession();
   },
 
-  setUser: function (user) {
-    session.user = user || null;
-    saveSession();
+  clearSession: function () {
+    _clearSessionSilent('manual');
   },
 
-  signOut: function () {
-    clearSession({ reason: 'manual' });
+  isSignedIn: function () {
+    return !!(_session.phone && _session.token);
   },
 
-  /* ---------------- CORE ---------------- */
-  request: request,
-
+  /* ---------- Core ping / debug ---------- */
   ping: function () {
-    return request('ping', {}, { retry: false, timeout: 8000 });
+    return _request('ping', {}, { timeout: 8000 });
   },
 
   debug: function () {
-    return request('debug', {}, { retry: false });
+    return _request('debug', {}, { timeout: 8000 });
   },
 
-  /* ---------------- AUTH ---------------- */
-  sendOtp: function (phone, email, purpose) {
-    return request('sendOtp', { phone: phone, email: email, purpose: purpose || 'register' });
+  /* ---------- Auth ---------- */
+  checkSession: async function () {
+    if (!_session.phone || !_session.token) return { valid: false };
+    const r = await _request('checkSession');
+    if (r.error) return { valid: false, error: r.error };
+    return r.data || { valid: false };
   },
 
-  verifyOtp: function (phone, code) {
-    return request('verifyOtp', { phone: phone, code: code });
-  },
-
-  register: function (data) {
-    return request('register', data).then(function (res) {
-      if (res && res.token && res.phone) {
-        api.setSession(res.phone, res.token, res.user);
-      }
-      return res;
+  sendOtp: async function (phone, email, purpose) {
+    const r = await _request('sendOtp', {
+      phone: phone, email: email, purpose: purpose || 'register'
     });
+    if (r.error) return { ok: false, error: r.error, message: r.message, retry: r.retry };
+    return r.data;
   },
 
-  login: function (identity, password) {
-    return request('login', { phone: identity, password: password }).then(function (res) {
-      if (res && res.token && res.phone) {
-        api.setSession(res.phone, res.token, res.user);
-      }
-      return res;
-    });
+  verifyOtp: async function (phone, code) {
+    const r = await _request('verifyOtp', { phone: phone, code: code });
+    if (r.error) return { ok: false, error: r.error, message: r.message };
+    return r.data;
   },
 
-  loginWithOtp: function (phone, code, device) {
-    return request('login', { phone: phone, code: code, device: device }).then(function (res) {
-      if (res && res.token && res.phone) {
-        api.setSession(res.phone, res.token, res.user);
-      }
-      return res;
-    });
+  register: async function (data) {
+    const r = await _request('register', data);
+    if (r.error) return { error: r.error, message: r.message };
+    return r.data;
   },
 
-  logout: function () {
-    return request('logout', {}).finally(function () {
-      clearSession({ reason: 'logout' });
-    });
+  login: async function (creds) {
+    // creds = { phone: identity, password }
+    const r = await _request('login', creds);
+    if (r.error) return { error: r.error, message: r.message };
+    return r.data;
   },
 
-  checkSession: function () {
-    if (!session.phone || !session.token) return Promise.resolve({ valid: false });
-    return request('checkSession', {}, { retry: false }).then(function (res) {
-      if (res && res.valid && res.user) api.setUser(res.user);
-      return res;
-    }).catch(function () {
-      return { valid: false };
-    });
+  logout: async function () {
+    const r = await _request('logout');
+    _clearSessionSilent('logout');
+    return r;
   },
 
-  /* ---------------- PROFILE ---------------- */
-  getMe: function () {
-    return request('getMe', {}).then(function (u) {
-      api.setUser(u);
-      return u;
-    });
+  /* ---------- Profile ---------- */
+  getMe: async function () {
+    const r = await _request('getMe');
+    if (r.error) return null;
+    if (r.data) _session.user = r.data;
+    _saveSession();
+    return r.data;
   },
 
-  updateMe: function (patch) {
-    return request('updateMe', { patch: patch }).then(function (u) {
-      api.setUser(u);
-      return u;
-    });
+  updateMe: async function (patch) {
+    const r = await _request('updateMe', { patch: patch });
+    if (r.error) return null;
+    if (r.data) _session.user = r.data;
+    _saveSession();
+    return r.data;
   },
 
-  setPassword: function (password, oldPassword) {
-    return request('setPassword', { password: password, oldPassword: oldPassword });
+  setPassword: async function (password, oldPassword) {
+    const r = await _request('setPassword', { password: password, oldPassword: oldPassword });
+    return r.error ? null : r.data;
   },
 
-  /* ---------------- STEERAGENT ---------------- */
-  becomeAgent: function (data) {
-    return request('becomeAgent', data).then(function (res) {
-      if (res && res.user) api.setUser(res.user);
-      return res;
-    });
+  /* ---------- SteerAgent ---------- */
+  becomeAgent: async function (data) {
+    const r = await _request('becomeAgent', data);
+    if (r.error) return null;
+    return r.data;
   },
 
-  /* ---------------- LANES ---------------- */
-  listLanes: function () {
-    return request('listLanes', {}, { retry: false });
+  /* ---------- Lanes ---------- */
+  listLanes: async function () {
+    const r = await _request('listLanes');
+    return r.error ? [] : (Array.isArray(r.data) ? r.data : []);
   },
 
-  insertLane: function (row) {
-    return request('insertLane', { row: row });
+  insertLane: async function (row) {
+    const r = await _request('insertLane', { row: row });
+    return r.error ? null : r.data;
   },
 
-  updateLane: function (id, row) {
-    return request('updateLane', Object.assign({ id: id }, row || {}));
+  removeLane: async function (id) {
+    const r = await _request('removeLane', { id: id });
+    return r.error ? null : r.data;
   },
 
-  removeLane: function (id) {
-    return request('removeLane', { id: id });
+  /* ---------- Hive ---------- */
+  listHive: async function () {
+    const r = await _request('listHive');
+    return r.error ? [] : (Array.isArray(r.data) ? r.data : []);
   },
 
-  /* ---------------- HIVE ---------------- */
-  listHive: function () {
-    return request('listHive', {}, { retry: false });
+  insertHive: async function (row) {
+    const r = await _request('insertHive', { row: row });
+    return r.error ? null : r.data;
   },
 
-  insertHive: function (row) {
-    return request('insertHive', { row: row });
-  },
-
-  updateHive: function (id, row) {
-    return request('updateHive', Object.assign({ id: id }, row || {}));
-  },
-
-  deleteHive: function (id) {
-    return request('deleteHive', { id: id });
+  deleteHive: async function (id) {
+    const r = await _request('deleteHive', { id: id });
+    return r.error ? null : r.data;
   },
 
   /**
-   * Toggle like. Pass current state → we send the correct delta.
+   * Like / unlike a post.
+   * app.js signature: api.like('hive', postId, delta)
    */
-  likeToggle: function (postId, currentlyLiked) {
-    const delta = currentlyLiked ? -1 : 1;
-    return request('like', { id: postId, delta: delta });
+  like: async function (kind, id, delta) {
+    const r = await _request('like', { id: id, delta: delta });
+    return r.error ? null : r.data;
   },
 
-  /* ---------------- HIVE COMMENTS ---------------- */
-  addHiveComment: function (postId, text) {
-    return request('addHiveComment', { postId: postId, text: text });
+  /* ---------- Hive Comments (v14) ---------- */
+  addHiveComment: async function (postId, text) {
+    const r = await _request('addHiveComment', { postId: postId, text: text });
+    return r.error ? { ok: false, error: r.error } : r.data;
   },
 
-  listHiveComments: function (postId, limit) {
-    return request('listHiveComments', { postId: postId, limit: limit || 100 }, { retry: false });
+  listHiveComments: async function (postId, limit) {
+    const r = await _request('listHiveComments', {
+      postId: postId, limit: limit || 100
+    });
+    return r.error ? [] : (Array.isArray(r.data) ? r.data : []);
   },
 
-  deleteHiveComment: function (commentId) {
-    return request('deleteHiveComment', { id: commentId });
+  deleteHiveComment: async function (id) {
+    const r = await _request('deleteHiveComment', { id: id });
+    return r.error ? null : r.data;
   },
 
-  /* ---------------- SHARE ---------------- */
-  getShareUrl: function (postId) {
-    const base = (typeof location !== 'undefined' && location.origin && location.pathname) || '';
-    return base + '#hive/' + encodeURIComponent(postId);
+  /* ---------- Messages ---------- */
+  getMessages: async function (roomId, limit) {
+    const r = await _request('getMessages', {
+      roomId: roomId, limit: limit || 50
+    });
+    return r.error ? [] : (Array.isArray(r.data) ? r.data : []);
   },
 
-  /* ---------------- MESSAGES ---------------- */
-  getMessages: function (roomId, limit) {
-    return request('getMessages', { roomId: roomId, limit: limit || 50 }, { retry: false });
+  sendMessage: async function (row) {
+    const r = await _request('sendMessage', { row: row });
+    return r.error ? null : r.data;
   },
 
-  sendMessage: function (row) {
-    return request('sendMessage', { row: row });
+  /* ---------- Presence ---------- */
+  updatePresence: async function (data) {
+    const r = await _request('updatePresence', { row: data });
+    return r.error ? null : r.data;
   },
 
-  /* ---------------- PRESENCE ---------------- */
-  updatePresence: function (row) {
-    return request('updatePresence', { row: row }, { retry: false });
+  activeVehicles: async function () {
+    const r = await _request('activeVehicles');
+    return r.error ? [] : (Array.isArray(r.data) ? r.data : []);
   },
 
-  activeVehicles: function () {
-    return request('activeVehicles', {}, { retry: false });
+  removePresence: async function () {
+    const r = await _request('removePresence');
+    return r.error ? null : r.data;
   },
 
-  removePresence: function () {
-    return request('removePresence', {});
+  /* ---------- Trips ---------- */
+  startTrip: async function (data) {
+    const r = await _request('startTrip', { data: data });
+    return r.error ? null : r.data;
   },
 
-  /* ---------------- TRIPS ---------------- */
-  startTrip: function (data) {
-    return request('startTrip', { data: data });
+  endTrip: async function (id, data) {
+    const payload = Object.assign({ id: id }, data || {});
+    const r = await _request('endTrip', payload);
+    return r.error ? null : r.data;
   },
 
-  endTrip: function (id, data) {
-    return request('endTrip', Object.assign({ id: id }, data || {}));
+  myTrips: async function () {
+    const r = await _request('myTrips');
+    return r.error ? [] : (Array.isArray(r.data) ? r.data : []);
   },
 
-  myTrips: function () {
-    return request('myTrips', {}, { retry: false });
+  /* ---------- Points ---------- */
+  savePoint: async function (row) {
+    const r = await _request('savePoint', { row: row });
+    return r.error ? null : r.data;
   },
 
-  /* ---------------- POINTS ---------------- */
-  savePoint: function (row) {
-    return request('savePoint', { row: row });
+  myPoints: async function () {
+    const r = await _request('myPoints');
+    return r.error ? [] : (Array.isArray(r.data) ? r.data : []);
   },
 
-  myPoints: function () {
-    return request('myPoints', {}, { retry: false });
+  deletePoint: async function (id) {
+    const r = await _request('deletePoint', { id: id });
+    return r.error ? null : r.data;
   },
 
-  listPoints: function () {
-    return request('listPoints', {}, { retry: false });
-  },
-
-  deletePoint: function (id) {
-    return request('deletePoint', { id: id });
-  },
-
-  /* ---------------- IMAGES ---------------- */
+  /* ---------- Images ---------- */
   /**
-   * Upload an image. Accepts:
-   *   - File / Blob (from <input type="file">)
-   *   - dataURL string ("data:image/jpeg;base64,...")
-   *   - raw base64 string
-   *
-   * Auto-compresses files larger than 3 MB.
+   * Upload an image.
+   * app.js signature: api.uploadImage(base64, folder, filename)
+   *   base64   → data URL ("data:image/jpeg;base64,...") OR raw base64
+   *   folder   → 'lanes' | 'hive' | 'avatars' | 'vehicles' | 'misc'
+   *   filename → used only for the stored file name
+   * Returns { fileId, url, thumbUrl, viewUrl, mimeType, size } or null.
    */
-  uploadImage: async function (src, opts) {
-    opts = opts || {};
-    const dataUrl = await normalizeImageSource(src);
-
-    // Size guard
-    if (dataUrl.length > MAX_UPLOAD_B64_CHARS) {
-      throw new ApiError('too_large', 'Image is too large after compression');
-    }
-
-    const body = {
-      base64: dataUrl,
-      folder: opts.folder || 'misc',
-      filename: opts.filename || ''
-    };
-
-    return request('uploadImage', body, { timeout: UPLOAD_TIMEOUT_MS, retry: false });
+  uploadImage: async function (base64, folder, filename) {
+    const r = await _request('uploadImage', {
+      base64: base64,
+      folder: folder || 'misc',
+      filename: filename || ''
+    }, { timeout: UPLOAD_TIMEOUT_MS });
+    return r.error ? null : r.data;
   },
 
-  deleteImage: function (fileId) {
-    return request('deleteImage', { fileId: fileId });
+  deleteImage: async function (fileId) {
+    const r = await _request('deleteImage', { fileId: fileId });
+    return r.error ? null : r.data;
   },
 
-  /* ---------------- ADMIN ---------------- */
-  adminPendingAgents: function () {
-    return request('adminPendingAgents', {}, { retry: false });
+  /* ---------- Admin ---------- */
+  adminPendingAgents: async function () {
+    const r = await _request('adminPendingAgents');
+    return r.error ? [] : (Array.isArray(r.data) ? r.data : []);
   },
 
-  adminApproveAgent: function (uid, approve, reason) {
-    return request('adminApproveAgent', {
+  adminApproveAgent: async function (uid, approve, reason) {
+    const r = await _request('adminApproveAgent', {
       uid: uid,
       approve: approve !== false,
       reason: reason || ''
     });
+    return r.error ? null : r.data;
   },
 
-  adminRejectAgent: function (uid, reason) {
-    return request('adminRejectAgent', { uid: uid, reason: reason || '' });
+  adminRejectAgent: async function (uid, reason) {
+    const r = await _request('adminRejectAgent', {
+      uid: uid, reason: reason || ''
+    });
+    return r.error ? null : r.data;
   },
 
-  /* ---------------- REPORTS ---------------- */
-  reportUser: function (vehicle, reason, detail) {
-    return request('reportUser', { vehicle: vehicle, reason: reason, detail: detail });
+  /* ---------- Reports / Alerts ---------- */
+  /**
+   * app.js signature: api.reportAlert({ type, lat, lng })
+   * Backend action is `reportUser` (needs reason + optional target vehicle).
+   */
+  reportAlert: async function (data) {
+    data = data || {};
+    const r = await _request('reportUser', {
+      vehicle: data.vehicle || '',
+      reason: data.type || 'alert',
+      detail: (data.lat != null ? String(data.lat) : '') + ',' +
+              (data.lng != null ? String(data.lng) : '')
+    });
+    return r.error ? null : r.data;
+  },
+
+  reportUser: async function (vehicle, reason, detail) {
+    const r = await _request('reportUser', {
+      vehicle: vehicle, reason: reason, detail: detail
+    });
+    return r.error ? null : r.data;
   }
 };
 
-/* --------------------------- NAMED EXPORTS --------------------------- */
-// Some app.js files prefer named imports
-export const {
-  ping, debug,
-  sendOtp, verifyOtp, register, login, logout, checkSession,
-  getMe, updateMe, setPassword,
-  becomeAgent,
-  listLanes, insertLane, updateLane, removeLane,
-  listHive, insertHive, updateHive, deleteHive, likeToggle,
-  addHiveComment, listHiveComments, deleteHiveComment,
-  getShareUrl,
-  getMessages, sendMessage,
-  updatePresence, activeVehicles, removePresence,
-  startTrip, endTrip, myTrips,
-  savePoint, myPoints, listPoints, deletePoint,
-  uploadImage, deleteImage,
-  adminPendingAgents, adminApproveAgent, adminRejectAgent,
-  reportUser
-} = api;
-
+/* --------------------------- DEFAULT EXPORT --------------------------- */
 export default api;
+
+/* --------------------------- LOG --------------------------- */
+console.log('[api] v2.0 loaded →', SHEET_API_URL.slice(0, 60) + '…');
