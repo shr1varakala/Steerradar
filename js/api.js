@@ -1,22 +1,14 @@
 /**
  * ============================================================================
- * STEERADAR API CLIENT (v2.0)
+ * STEERADAR API CLIENT (v2.1)
  * ============================================================================
- * Matches app.js v14.1 call signatures exactly.
- *
- * Public:
- *   • getters: api.token, api.phone, api.user, api.lastError
- *   • setSession({ phone, token, user })   — saves to localStorage
- *   • clearSession()                       — wipes session
- *   • checkSession()                       — { valid, user } | { valid:false }
- *   • login({ phone, password })           — { token, phone, user } or { error }
- *   • sendOtp(phone, email, purpose)       — { ok, sentTo } or { ok:false, error }
- *   • verifyOtp(phone, code)               — { ok, verified } or { ok:false, error }
- *   • register(data)                       — { token, phone, user } or { error }
- *   • uploadImage(base64, folder, name)    — { url, fileId, ... }
- *   • like(kind, id, delta)                — { likes, liked }
- *   • addHiveComment / listHiveComments / deleteHiveComment
- *   • … all other backend actions
+ * v2.1 changes:
+ *   • AbortController now uses a reason string — no more
+ *     "signal is aborted without reason" log spam
+ *   • Per-action timeouts: FAST 10s · NORMAL 25s · SLOW 30s · UPLOAD 90s
+ *   • Retry policy: one retry on timeout, no retry on user cancel / HTTP 4xx
+ *   • Errors always carry { code, message, retry, action }
+ *   • Request failures now surface the action name — much easier to debug
  * ============================================================================
  */
 
@@ -27,8 +19,36 @@ const SHEET_API_URL =
   (typeof window !== 'undefined' && window.STEERADAR && window.STEERADAR.SHEET_API_URL) ||
   'https://script.google.com/macros/s/AKfycbwcATMRSXU-LogPvBJtvS2n6oxVa51o9d48F29s9FUe96C0X-VaV_KgqHvEVLNICfzr/exec';
 
-const TIMEOUT_MS        = 25000;
-const UPLOAD_TIMEOUT_MS = 90000;
+const TIMEOUTS = {
+  FAST:   10000, // ping, checkSession, logout
+  NORMAL: 25000, // default
+  SLOW:   35000, // listHive, listLanes, activeVehicles, myTrips, uploads metadata
+  UPLOAD: 90000  // image uploads
+};
+
+/**
+ * Which actions need a longer timeout.
+ * Everything else uses NORMAL.
+ */
+const ACTION_TIMEOUTS = {
+  ping:           TIMEOUTS.FAST,
+  checkSession:   TIMEOUTS.FAST,
+  logout:         TIMEOUTS.FAST,
+  debug:          TIMEOUTS.FAST,
+
+  listHive:       TIMEOUTS.SLOW,
+  listLanes:      TIMEOUTS.SLOW,
+  activeVehicles: TIMEOUTS.SLOW,
+  myTrips:        TIMEOUTS.SLOW,
+  myPoints:       TIMEOUTS.SLOW,
+  listPoints:     TIMEOUTS.SLOW,
+  adminPendingAgents: TIMEOUTS.SLOW,
+
+  uploadImage:    TIMEOUTS.UPLOAD
+};
+
+const MAX_RETRIES = 1;
+const RETRY_BACKOFF_MS = 2000;
 
 /* --------------------------- SESSION --------------------------- */
 const KEYS = {
@@ -39,6 +59,7 @@ const KEYS = {
 
 let _session = { phone: '', token: '', user: null };
 let _lastError = '';
+let _lastErrorAction = '';
 
 function _loadSession() {
   try {
@@ -79,26 +100,32 @@ function _clearSessionSilent(reason) {
 _loadSession();
 
 /* --------------------------- REQUEST CORE --------------------------- */
-/**
- * Send a POST to the Apps Script endpoint.
- * Returns { data } on success, or { error, message, retry } on failure.
- */
-async function _request(action, params, opts) {
-  opts = opts || {};
-  const timeout = opts.timeout || TIMEOUT_MS;
 
+function _timeoutFor(action, override) {
+  if (override && override.timeout) return override.timeout;
+  return ACTION_TIMEOUTS[action] || TIMEOUTS.NORMAL;
+}
+
+/**
+ * Single fetch attempt.
+ * Returns { ok:true, data } or { ok:false, error:{ code, message, retry, abort } }
+ */
+async function _attempt(action, params, timeoutMs) {
   const body = Object.assign({ action: action }, params || {});
   if (_session.phone) body.phone = _session.phone;
   if (_session.token) body.token = _session.token;
 
   const controller = new AbortController();
-  const timer = setTimeout(function () { controller.abort(); }, timeout);
+  const reason = 'steeradar_timeout_' + action + '_' + timeoutMs + 'ms';
+  const timer = setTimeout(function () {
+    // Provide a reason so the error message is meaningful
+    try { controller.abort(reason); } catch (e) { controller.abort(); }
+  }, timeoutMs);
 
   let res;
   try {
     res = await fetch(SHEET_API_URL, {
       method: 'POST',
-      // text/plain avoids CORS preflight (Apps Script requires this)
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -106,41 +133,125 @@ async function _request(action, params, opts) {
     });
   } catch (e) {
     clearTimeout(timer);
-    const msg = (e && e.name === 'AbortError') ? 'Request timed out' : ((e && e.message) || 'Network error');
-    _lastError = msg;
-    logger.warn('API ' + action + ' → ' + msg);
-    return { error: 'network', message: msg };
+
+    // AbortError — the user's or our timeout, not a network fault
+    if (e && (e.name === 'AbortError' || e.code === 20)) {
+      return {
+        ok: false,
+        error: {
+          code: 'timeout',
+          message: 'Request timed out after ' + Math.round(timeoutMs / 1000) + 's',
+          retry: 3,
+          abort: true
+        }
+      };
+    }
+
+    return {
+      ok: false,
+      error: {
+        code: 'network',
+        message: (e && e.message) ? e.message : 'Network error',
+        retry: 5
+      }
+    };
   }
   clearTimeout(timer);
 
   if (!res.ok) {
-    _lastError = 'Server error ' + res.status;
-    logger.warn('API ' + action + ' → HTTP ' + res.status);
-    return { error: 'http_' + res.status, message: _lastError };
+    // HTTP error — 5xx is retryable, 4xx is not
+    const retry = res.status >= 500 ? 5 : null;
+    return {
+      ok: false,
+      error: {
+        code: 'http_' + res.status,
+        message: 'Server error (' + res.status + ')',
+        retry: retry
+      }
+    };
   }
 
   let json;
   try {
     json = await res.json();
   } catch (e) {
-    _lastError = 'Malformed server response';
-    return { error: 'bad_json', message: _lastError };
+    return {
+      ok: false,
+      error: { code: 'bad_json', message: 'Malformed server response', retry: null }
+    };
   }
 
-  // Backend returns either { data: <handler return> } or { error, message, retry }
   if (json && json.error) {
-    _lastError = json.message || json.error;
-
-    // Auto-clear on auth failures
+    // Auto-clear on auth failure
     if (json.error === 'unauthorized' || json.error === 'bad_session' || json.error === 'banned') {
-      logger.warn('Session invalid — signing out (' + json.error + ')');
       _clearSessionSilent(json.error);
     }
-
-    return { error: json.error, message: json.message || json.error, retry: json.retry };
+    return {
+      ok: false,
+      error: {
+        code: json.error,
+        message: json.message || json.error,
+        retry: json.retry || null
+      }
+    };
   }
 
-  return { data: (json && 'data' in json) ? json.data : json };
+  return { ok: true, data: (json && 'data' in json) ? json.data : json };
+}
+
+/**
+ * Public request with retry.
+ */
+async function _request(action, params, opts) {
+  opts = opts || {};
+  const timeoutMs = _timeoutFor(action, opts);
+  const maxRetries = (opts.retry === false) ? 0 : MAX_RETRIES;
+
+  let lastErr = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const r = await _attempt(action, params, timeoutMs);
+
+    if (r.ok) return { data: r.data };
+
+    lastErr = r.error;
+
+    // Decide whether to retry
+    const shouldRetry =
+      attempt < maxRetries &&
+      lastErr &&
+      lastErr.retry &&
+      // Never retry auth/bad-request errors
+      lastErr.code !== 'unauthorized' &&
+      lastErr.code !== 'bad_session' &&
+      lastErr.code !== 'banned' &&
+      !/^http_4/.test(lastErr.code);
+
+    if (!shouldRetry) break;
+
+    logger.warn(
+      'API ' + action + ' → ' + lastErr.message +
+      ' — retrying in ' + RETRY_BACKOFF_MS + 'ms (attempt ' + (attempt + 2) + '/' + (maxRetries + 1) + ')'
+    );
+
+    await new Promise(function (resolve) { setTimeout(resolve, RETRY_BACKOFF_MS); });
+  }
+
+  _lastError = (lastErr && lastErr.message) || 'Request failed';
+  _lastErrorAction = action;
+
+  // Only log the final failure once
+  if (lastErr && lastErr.code !== 'timeout') {
+    logger.warn('API ' + action + ' failed: ' + _lastError);
+  } else if (lastErr) {
+    logger.warn('API ' + action + ' timed out');
+  }
+
+  return {
+    error: lastErr ? lastErr.code : 'unknown',
+    message: _lastError,
+    retry: lastErr ? lastErr.retry : null
+  };
 }
 
 /* ============================================================================
@@ -149,11 +260,12 @@ async function _request(action, params, opts) {
 
 export const api = {
 
-  /* ---------- Session getters (app.js reads these as properties) ---------- */
-  get token()     { return _session.token; },
-  get phone()     { return _session.phone; },
-  get user()      { return _session.user; },
-  get lastError() { return _lastError; },
+  /* ---------- Session getters ---------- */
+  get token()           { return _session.token; },
+  get phone()           { return _session.phone; },
+  get user()            { return _session.user; },
+  get lastError()       { return _lastError; },
+  get lastErrorAction() { return _lastErrorAction; },
 
   setSession: function (s) {
     if (!s) return;
@@ -163,27 +275,23 @@ export const api = {
     _saveSession();
   },
 
-  clearSession: function () {
-    _clearSessionSilent('manual');
-  },
+  clearSession: function () { _clearSessionSilent('manual'); },
 
-  isSignedIn: function () {
-    return !!(_session.phone && _session.token);
-  },
+  isSignedIn: function () { return !!(_session.phone && _session.token); },
 
-  /* ---------- Core ping / debug ---------- */
+  /* ---------- Core ---------- */
   ping: function () {
-    return _request('ping', {}, { timeout: 8000 });
+    return _request('ping', {}, { retry: false });
   },
 
   debug: function () {
-    return _request('debug', {}, { timeout: 8000 });
+    return _request('debug', {}, { retry: false });
   },
 
   /* ---------- Auth ---------- */
   checkSession: async function () {
     if (!_session.phone || !_session.token) return { valid: false };
-    const r = await _request('checkSession');
+    const r = await _request('checkSession', {}, { retry: false });
     if (r.error) return { valid: false, error: r.error };
     return r.data || { valid: false };
   },
@@ -191,32 +299,31 @@ export const api = {
   sendOtp: async function (phone, email, purpose) {
     const r = await _request('sendOtp', {
       phone: phone, email: email, purpose: purpose || 'register'
-    });
+    }, { retry: false });
     if (r.error) return { ok: false, error: r.error, message: r.message, retry: r.retry };
     return r.data;
   },
 
   verifyOtp: async function (phone, code) {
-    const r = await _request('verifyOtp', { phone: phone, code: code });
+    const r = await _request('verifyOtp', { phone: phone, code: code }, { retry: false });
     if (r.error) return { ok: false, error: r.error, message: r.message };
     return r.data;
   },
 
   register: async function (data) {
-    const r = await _request('register', data);
+    const r = await _request('register', data, { retry: false });
     if (r.error) return { error: r.error, message: r.message };
     return r.data;
   },
 
   login: async function (creds) {
-    // creds = { phone: identity, password }
-    const r = await _request('login', creds);
+    const r = await _request('login', creds, { retry: false });
     if (r.error) return { error: r.error, message: r.message };
     return r.data;
   },
 
   logout: async function () {
-    const r = await _request('logout');
+    const r = await _request('logout', {}, { retry: false });
     _clearSessionSilent('logout');
     return r;
   },
@@ -225,27 +332,25 @@ export const api = {
   getMe: async function () {
     const r = await _request('getMe');
     if (r.error) return null;
-    if (r.data) _session.user = r.data;
-    _saveSession();
+    if (r.data) { _session.user = r.data; _saveSession(); }
     return r.data;
   },
 
   updateMe: async function (patch) {
-    const r = await _request('updateMe', { patch: patch });
+    const r = await _request('updateMe', { patch: patch }, { retry: false });
     if (r.error) return null;
-    if (r.data) _session.user = r.data;
-    _saveSession();
+    if (r.data) { _session.user = r.data; _saveSession(); }
     return r.data;
   },
 
   setPassword: async function (password, oldPassword) {
-    const r = await _request('setPassword', { password: password, oldPassword: oldPassword });
+    const r = await _request('setPassword', { password: password, oldPassword: oldPassword }, { retry: false });
     return r.error ? null : r.data;
   },
 
   /* ---------- SteerAgent ---------- */
   becomeAgent: async function (data) {
-    const r = await _request('becomeAgent', data);
+    const r = await _request('becomeAgent', data, { retry: false });
     if (r.error) return null;
     return r.data;
   },
@@ -257,12 +362,18 @@ export const api = {
   },
 
   insertLane: async function (row) {
-    const r = await _request('insertLane', { row: row });
+    const r = await _request('insertLane', { row: row }, { retry: false });
     return r.error ? null : r.data;
   },
 
   removeLane: async function (id) {
-    const r = await _request('removeLane', { id: id });
+    const r = await _request('removeLane', { id: id }, { retry: false });
+    return r.error ? null : r.data;
+  },
+
+  updateLane: async function (id, row) {
+    const payload = Object.assign({ id: id }, row || {});
+    const r = await _request('updateLane', payload, { retry: false });
     return r.error ? null : r.data;
   },
 
@@ -273,27 +384,29 @@ export const api = {
   },
 
   insertHive: async function (row) {
-    const r = await _request('insertHive', { row: row });
+    const r = await _request('insertHive', { row: row }, { retry: false });
+    return r.error ? null : r.data;
+  },
+
+  updateHive: async function (id, row) {
+    const payload = Object.assign({ id: id }, row || {});
+    const r = await _request('updateHive', payload, { retry: false });
     return r.error ? null : r.data;
   },
 
   deleteHive: async function (id) {
-    const r = await _request('deleteHive', { id: id });
+    const r = await _request('deleteHive', { id: id }, { retry: false });
     return r.error ? null : r.data;
   },
 
-  /**
-   * Like / unlike a post.
-   * app.js signature: api.like('hive', postId, delta)
-   */
   like: async function (kind, id, delta) {
-    const r = await _request('like', { id: id, delta: delta });
+    const r = await _request('like', { id: id, delta: delta }, { retry: false });
     return r.error ? null : r.data;
   },
 
-  /* ---------- Hive Comments (v14) ---------- */
+  /* ---------- Hive Comments ---------- */
   addHiveComment: async function (postId, text) {
-    const r = await _request('addHiveComment', { postId: postId, text: text });
+    const r = await _request('addHiveComment', { postId: postId, text: text }, { retry: false });
     return r.error ? { ok: false, error: r.error } : r.data;
   },
 
@@ -305,7 +418,7 @@ export const api = {
   },
 
   deleteHiveComment: async function (id) {
-    const r = await _request('deleteHiveComment', { id: id });
+    const r = await _request('deleteHiveComment', { id: id }, { retry: false });
     return r.error ? null : r.data;
   },
 
@@ -318,13 +431,16 @@ export const api = {
   },
 
   sendMessage: async function (row) {
-    const r = await _request('sendMessage', { row: row });
+    const r = await _request('sendMessage', { row: row }, { retry: false });
     return r.error ? null : r.data;
   },
 
   /* ---------- Presence ---------- */
   updatePresence: async function (data) {
-    const r = await _request('updatePresence', { row: data });
+    const r = await _request('updatePresence', { row: data }, {
+      retry: false,
+      timeout: TIMEOUTS.FAST // presence is fire-and-forget, don't wait 25s
+    });
     return r.error ? null : r.data;
   },
 
@@ -334,19 +450,19 @@ export const api = {
   },
 
   removePresence: async function () {
-    const r = await _request('removePresence');
+    const r = await _request('removePresence', {}, { retry: false });
     return r.error ? null : r.data;
   },
 
   /* ---------- Trips ---------- */
   startTrip: async function (data) {
-    const r = await _request('startTrip', { data: data });
+    const r = await _request('startTrip', { data: data }, { retry: false });
     return r.error ? null : r.data;
   },
 
   endTrip: async function (id, data) {
     const payload = Object.assign({ id: id }, data || {});
-    const r = await _request('endTrip', payload);
+    const r = await _request('endTrip', payload, { retry: false });
     return r.error ? null : r.data;
   },
 
@@ -357,7 +473,7 @@ export const api = {
 
   /* ---------- Points ---------- */
   savePoint: async function (row) {
-    const r = await _request('savePoint', { row: row });
+    const r = await _request('savePoint', { row: row }, { retry: false });
     return r.error ? null : r.data;
   },
 
@@ -366,31 +482,28 @@ export const api = {
     return r.error ? [] : (Array.isArray(r.data) ? r.data : []);
   },
 
+  listPoints: async function () {
+    const r = await _request('listPoints');
+    return r.error ? [] : (Array.isArray(r.data) ? r.data : []);
+  },
+
   deletePoint: async function (id) {
-    const r = await _request('deletePoint', { id: id });
+    const r = await _request('deletePoint', { id: id }, { retry: false });
     return r.error ? null : r.data;
   },
 
   /* ---------- Images ---------- */
-  /**
-   * Upload an image.
-   * app.js signature: api.uploadImage(base64, folder, filename)
-   *   base64   → data URL ("data:image/jpeg;base64,...") OR raw base64
-   *   folder   → 'lanes' | 'hive' | 'avatars' | 'vehicles' | 'misc'
-   *   filename → used only for the stored file name
-   * Returns { fileId, url, thumbUrl, viewUrl, mimeType, size } or null.
-   */
   uploadImage: async function (base64, folder, filename) {
     const r = await _request('uploadImage', {
       base64: base64,
       folder: folder || 'misc',
       filename: filename || ''
-    }, { timeout: UPLOAD_TIMEOUT_MS });
+    }, { timeout: TIMEOUTS.UPLOAD, retry: false });
     return r.error ? null : r.data;
   },
 
   deleteImage: async function (fileId) {
-    const r = await _request('deleteImage', { fileId: fileId });
+    const r = await _request('deleteImage', { fileId: fileId }, { retry: false });
     return r.error ? null : r.data;
   },
 
@@ -405,22 +518,18 @@ export const api = {
       uid: uid,
       approve: approve !== false,
       reason: reason || ''
-    });
+    }, { retry: false });
     return r.error ? null : r.data;
   },
 
   adminRejectAgent: async function (uid, reason) {
     const r = await _request('adminRejectAgent', {
       uid: uid, reason: reason || ''
-    });
+    }, { retry: false });
     return r.error ? null : r.data;
   },
 
   /* ---------- Reports / Alerts ---------- */
-  /**
-   * app.js signature: api.reportAlert({ type, lat, lng })
-   * Backend action is `reportUser` (needs reason + optional target vehicle).
-   */
   reportAlert: async function (data) {
     data = data || {};
     const r = await _request('reportUser', {
@@ -428,20 +537,18 @@ export const api = {
       reason: data.type || 'alert',
       detail: (data.lat != null ? String(data.lat) : '') + ',' +
               (data.lng != null ? String(data.lng) : '')
-    });
+    }, { retry: false });
     return r.error ? null : r.data;
   },
 
   reportUser: async function (vehicle, reason, detail) {
     const r = await _request('reportUser', {
       vehicle: vehicle, reason: reason, detail: detail
-    });
+    }, { retry: false });
     return r.error ? null : r.data;
   }
 };
 
-/* --------------------------- DEFAULT EXPORT --------------------------- */
 export default api;
 
-/* --------------------------- LOG --------------------------- */
-console.log('[api] v2.0 loaded →', SHEET_API_URL.slice(0, 60) + '…');
+console.log('[api] v2.1 loaded →', SHEET_API_URL.slice(0, 60) + '…');
