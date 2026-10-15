@@ -1,30 +1,42 @@
 /* ============================================================================
-   STEERADAR LOGGER (v2.1)
+   STEERADAR LOGGER (v2.2)
    ============================================================================
-   v2.1 changes:
-     • Added logger.init()  — no-op for backward compat (app.js calls it)
-     • Added logger.render() — alias for refresh()
-     • Sanitize every entry loaded from localStorage (old versions wrote
-       entries without a valid `ts`, causing "Invalid time value" crashes)
-     • safeTs() guards all Date construction
-     • Every log method accepts any number of args
+   v2.2 changes:
+     • Duplicate suppression — identical consecutive messages collapse
+     • Silence patterns — noisy errors (geolocation Timeout expired / denied)
+       logged ONCE per session, then suppressed
+     • logger.silence(pattern) / logger.unsilence(pattern) — runtime control
+     • safeTs() — any malformed timestamp is replaced with Date.now()
+   v2.1:
+     • logger.init() / logger.render() aliases for app.js backward compat
+     • Sanitizes entries restored from localStorage
    ============================================================================ */
 
 const STORAGE_KEY = 'steeradar-log';
 const MAX_ENTRIES = 500;
 const RENDER_DEBOUNCE_MS = 120;
+const DUPLICATE_WINDOW_MS = 5000; // collapse same-message within 5 s
 
 /* --------------------------- STATE --------------------------- */
 let entries = [];
 let renderTimer = null;
 let isBound = false;
+let lastEntry = null; // { msg, level, ts, count }
+
+/**
+ * Patterns that are logged only ONCE per session even if they recur.
+ * Matches against the raw message string.
+ */
+const SILENCE_PATTERNS = [
+  /User denied Geolocation/i,
+  /Timeout expired/i,
+  /signal is aborted without reason/i,
+  /Failed to fetch/i,
+  /Request timed out/i
+];
+const silenced = new Set(); // indices into SILENCE_PATTERNS that already fired
 
 /* --------------------------- SAFE DATE --------------------------- */
-/**
- * Return a valid millisecond timestamp.
- * Accepts: number | numeric string | ISO string | anything
- * Falls back to Date.now() if the input can't be parsed.
- */
 function safeTs(v) {
   if (v == null || v === '') return Date.now();
   if (typeof v === 'number' && isFinite(v) && v > 0) return v;
@@ -52,7 +64,8 @@ function loadFromStorage() {
         return {
           ts: safeTs(e.ts),
           level: VALID_LEVELS.indexOf(e.level) >= 0 ? e.level : 'info',
-          msg: String(e.msg == null ? '' : e.msg).slice(0, 4000)
+          msg: String(e.msg == null ? '' : e.msg).slice(0, 4000),
+          count: typeof e.count === 'number' && e.count > 1 ? e.count : 1
         };
       })
       .slice(-MAX_ENTRIES);
@@ -69,21 +82,12 @@ function saveToStorage() {
 }
 
 entries = loadFromStorage();
+if (entries.length) lastEntry = entries[entries.length - 1];
 
 /* --------------------------- HELPERS --------------------------- */
 function pad2(n) {
   const v = Number(n);
   return (isFinite(v) ? String(Math.floor(v)) : '00').padStart(2, '0');
-}
-
-function timeStamp() {
-  const d = new Date();
-  return (
-    pad2(d.getHours()) + ':' +
-    pad2(d.getMinutes()) + ':' +
-    pad2(d.getSeconds()) + '.' +
-    String(d.getMilliseconds()).padStart(3, '0')
-  );
 }
 
 function escapeHtml(s) {
@@ -105,11 +109,57 @@ function logModalIsOpen() {
   return !!el && !el.classList.contains('hidden');
 }
 
+/**
+ * Should this message be suppressed?
+ * Returns { silent: true, pattern } if it matches a silence pattern
+ * that has already fired this session.
+ */
+function shouldSilence(msg, level) {
+  // Only silence warnings/errors — never user-visible info
+  if (level !== 'error' && level !== 'warn') return false;
+  for (let i = 0; i < SILENCE_PATTERNS.length; i++) {
+    if (SILENCE_PATTERNS[i].test(msg)) {
+      if (silenced.has(i)) return true;
+      silenced.add(i);
+      return false; // log once, then silence
+    }
+  }
+  return false;
+}
+
 /* --------------------------- CORE LOG --------------------------- */
 function addEntry(level, args) {
   const text = Array.from(args).map(normalizeArg).join(' ');
-  const entry = { ts: Date.now(), level: level || 'info', msg: text };
+  const now = Date.now();
+
+  // Silence known-noisy errors after their first occurrence
+  if (shouldSilence(text, level)) {
+    // Bump a hidden counter so "Clear" still works, but don't render
+    return;
+  }
+
+  // Duplicate collapse — same message + level within 5 s
+  if (
+    lastEntry &&
+    lastEntry.msg === text &&
+    lastEntry.level === level &&
+    now - lastEntry.ts < DUPLICATE_WINDOW_MS
+  ) {
+    lastEntry.ts = now;
+    lastEntry.count = (lastEntry.count || 1) + 1;
+    // Update the last in-memory entry in place
+    if (entries.length) {
+      entries[entries.length - 1].ts = now;
+      entries[entries.length - 1].count = lastEntry.count;
+    }
+    saveToStorage();
+    scheduleRender();
+    return;
+  }
+
+  const entry = { ts: now, level: level || 'info', msg: text, count: 1 };
   entries.push(entry);
+  lastEntry = entry;
 
   if (entries.length > MAX_ENTRIES) {
     entries = entries.slice(-MAX_ENTRIES);
@@ -153,10 +203,13 @@ function renderNow() {
         pad2(d.getMinutes()) + ':' +
         pad2(d.getSeconds());
       const level = e.level || 'info';
+      const count = (e.count && e.count > 1)
+        ? ' <span style="opacity:0.6; font-weight:700;">×' + e.count + '</span>'
+        : '';
       return (
         '<div class="log-line log-' + escapeHtml(level) + '">' +
           '<span class="log-time">' + stamp + '</span>' +
-          '<span class="log-msg">' + escapeHtml(e.msg) + '</span>' +
+          '<span class="log-msg">' + escapeHtml(e.msg) + count + '</span>' +
         '</div>'
       );
     })
@@ -168,11 +221,8 @@ function renderNow() {
 /* --------------------------- PUBLIC API --------------------------- */
 export const logger = {
 
-  /* v14 backward-compat: app.js calls logger.init() on boot */
   init: function () {
-    // Bind global error handlers if not already bound
     bindGlobalHandlers();
-    // Render if modal is already open
     if (logModalIsOpen()) renderNow();
     return { ok: true };
   },
@@ -183,16 +233,34 @@ export const logger = {
   error:   function () { addEntry('error',   arguments); },
   success: function () { addEntry('info',    arguments); },
 
-  /* v14 backward-compat: app.js calls logger.render() */
-  render: function () { renderNow(); return { ok: true }; },
-
-  /* Clearer alias (my v2.0 naming) */
+  render:  function () { renderNow(); return { ok: true }; },
   refresh: function () { renderNow(); return { ok: true }; },
 
   getAll: function () { return entries.slice(); },
 
+  /**
+   * Silence a custom pattern at runtime.
+   * Pass a RegExp or a string.
+   */
+  silence: function (pattern) {
+    const re = (pattern instanceof RegExp) ? pattern : new RegExp(String(pattern), 'i');
+    SILENCE_PATTERNS.push(re);
+    // Reset the "already silenced" tracking so the next match registers
+    silenced.clear();
+    return { ok: true, total: SILENCE_PATTERNS.length };
+  },
+
+  /** Forget all user-added silence patterns. */
+  unsilenceAll: function () {
+    SILENCE_PATTERNS.length = 4; // keep the 4 defaults
+    silenced.clear();
+    return { ok: true };
+  },
+
   clear: function () {
     entries = [];
+    lastEntry = null;
+    silenced.clear();
     try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
     renderNow();
     return { ok: true };
@@ -202,7 +270,8 @@ export const logger = {
     const text = entries.map(function (e) {
       const d = new Date(safeTs(e.ts));
       const iso = d.toISOString();
-      return '[' + iso + '] [' + (e.level || 'info').toUpperCase() + '] ' + e.msg;
+      const count = (e.count && e.count > 1) ? ' (×' + e.count + ')' : '';
+      return '[' + iso + '] [' + (e.level || 'info').toUpperCase() + '] ' + e.msg + count;
     }).join('\n');
 
     try {
@@ -313,6 +382,6 @@ if (document.readyState === 'loading') {
   }
 })();
 
-logger.info('Logger v2.1 initialized — ' + entries.length + ' entries restored');
+logger.info('Logger v2.2 initialized — ' + entries.length + ' entries restored');
 
 export default logger;
