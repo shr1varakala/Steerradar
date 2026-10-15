@@ -1,27 +1,11 @@
 /* ============================================================================
-   STEERADAR STYLESHEET (v14.1)
+   STEERADAR STYLESHEET (v15.0)
    ============================================================================
-   1. CSS Variables (Light + Dark Themes)
-   2. Reset & Base
-   3. Utilities
-   4. Buttons
-   5. Header
-   6. Bottom Nav & FAB
-   7. Lanes View
-   8. Hive View
-   9. Map View (with corner layout)
-   10. Bottom Sheet
-   11. Profile View
-   12. Modals
-   13. Forms
-   14. Chat Overlay
-   15. Toasts
-   16. Skeletons & Spinners
-   17. Trips
-   18. Log Viewer
-   19. Responsive
-   20. v14.0 Extras (chat avatars, agent profile, negotiation)
-   21. v14.1 NEW — Post detail, comments, share, hive photo preview
+   1–19. Original core (unchanged)
+   20.   v14.0 — chat avatars, agent profile, negotiation
+   21.   v14.1 — post detail, comments, share, hive photo preview
+   22.   v15.0 — quick pin sheet, departure countdown, map control bar,
+                 clickable avatars, UPI pay link
    ============================================================================ */
 
 /* ============================ 1. CSS VARIABLES ============================ */
@@ -136,6 +120,7 @@ html, body {
 .hidden { display: none !important; }
 .flex { display: flex; }
 .flex-col { flex-direction: column; }
+.flex-1 { flex: 1; }
 .justify-between { justify-content: space-between; }
 .justify-center { justify-content: center; }
 .align-center { align-items: center; }
@@ -457,6 +442,29 @@ main::-webkit-scrollbar { display: none; }
 .driver-rating { font-size: 10px; color: var(--warning); display: flex; align-items: center; gap: 2px; }
 .lane-actions { display: flex; gap: 6px; }
 
+/* ⭐ v15: departure countdown pill inside lane cards */
+.lane-countdown-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 20px;
+    background: var(--primary-subtle);
+    color: var(--primary);
+    letter-spacing: 0.3px;
+}
+.lane-countdown-pill.urgent {
+    background: var(--danger-subtle);
+    color: var(--danger);
+    animation: qpPulseUrgent 1.6s infinite;
+}
+.lane-countdown-pill.expired {
+    background: var(--border-subtle);
+    color: var(--text-muted);
+}
+
 /* ============================ 8. HIVE VIEW ============================ */
 .hive-header { text-align: center; margin-bottom: 18px; padding-top: 4px; }
 .hive-title {
@@ -641,7 +649,7 @@ main::-webkit-scrollbar { display: none; }
     flex-shrink: 0;
 }
 
-/* --- FILTER CHIPS (below search) --- */
+/* --- FILTER CHIPS --- */
 .map-chips {
     position: absolute;
     top: calc(132px + env(safe-area-inset-top, 0px));
@@ -723,7 +731,7 @@ main::-webkit-scrollbar { display: none; }
     50% { box-shadow: 0 0 0 12px rgba(239,68,68,0); }
 }
 
-/* Top-Right: Locate */
+/* ⭐ v15: TOP-RIGHT STACK (Refresh / Recenter / Enable GPS) */
 .map-top-right {
     position: absolute;
     top: calc(184px + env(safe-area-inset-top, 0px));
@@ -732,6 +740,29 @@ main::-webkit-scrollbar { display: none; }
     flex-direction: column;
     gap: 8px;
     z-index: 25;
+    padding: 6px;
+    background: var(--bg-glass);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 16px;
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-sm);
+}
+.map-top-right .map-ctrl-btn {
+    box-shadow: none;
+    background: transparent;
+    border: none;
+    width: 38px;
+    height: 38px;
+    font-size: 15px;
+}
+.map-top-right .map-ctrl-btn:hover {
+    background: var(--bg-card-hover);
+}
+/* GPS button turns green when actively tracking */
+#btn-enable-gps.tracking {
+    color: var(--primary);
+    background: var(--primary-subtle);
 }
 
 /* Mid-Left: Ghost */
@@ -866,12 +897,10 @@ main::-webkit-scrollbar { display: none; }
 .leaflet-popup-content { margin: 10px 12px !important; font-size: 12px !important; }
 .leaflet-popup-close-button { color: var(--text-sub) !important; padding: 6px !important; }
 
-/* Dark mode tile filter */
 [data-theme="dark"] .leaflet-tile-pane {
     filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(1.05) saturate(0.7);
 }
 
-/* Custom markers */
 .custom-saved-marker,
 .custom-alert-icon,
 .custom-vehicle-marker,
@@ -928,17 +957,8 @@ main::-webkit-scrollbar { display: none; }
     align-items: flex-start;
     margin-bottom: 16px;
 }
-.bs-title {
-    font-size: 18px;
-    font-weight: 800;
-    letter-spacing: -0.3px;
-    color: var(--text-main);
-}
-.bs-sub {
-    font-size: 12px;
-    color: var(--text-sub);
-    margin-top: 3px;
-}
+.bs-title { font-size: 18px; font-weight: 800; letter-spacing: -0.3px; color: var(--text-main); }
+.bs-sub { font-size: 12px; color: var(--text-sub); margin-top: 3px; }
 .bs-close {
     background: var(--bg-card);
     border: none;
@@ -982,13 +1002,9 @@ main::-webkit-scrollbar { display: none; }
 }
 .bs-actions .btn { flex: 1; }
 
-.bs-tag-row {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin: 10px 0;
-}
-/* ================= NEW MAP PIN STYLES (Pulsing effect) ================= */
+.bs-tag-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+
+/* ================= MAP PIN ================= */
 .custom-map-pin {
     position: relative;
     display: flex;
@@ -996,7 +1012,6 @@ main::-webkit-scrollbar { display: none; }
     align-items: center;
     cursor: pointer;
 }
-
 .pin-pulse {
     position: absolute;
     width: 50px;
@@ -1007,7 +1022,6 @@ main::-webkit-scrollbar { display: none; }
     animation: pulse 2s infinite;
     z-index: 1;
 }
-
 .pin-icon {
     background: white;
     padding: 8px;
@@ -1017,7 +1031,6 @@ main::-webkit-scrollbar { display: none; }
     z-index: 2;
     font-size: 18px;
 }
-
 .pin-label {
     margin-top: 4px;
     background: white;
@@ -1032,72 +1045,12 @@ main::-webkit-scrollbar { display: none; }
     gap: 4px;
     z-index: 2;
 }
-
 @keyframes pulse {
     0% { transform: scale(0.8); opacity: 0.5; }
     70% { transform: scale(1.5); opacity: 0; }
     100% { transform: scale(0.8); opacity: 0; }
 }
 
-/* ================= CHAT MESSAGE AVATARS ================= */
-.chat-message {
-    display: flex;
-    margin-bottom: 15px;
-    max-width: 80%;
-}
-
-.chat-message.agent {
-    align-self: flex-start;
-    flex-direction: row;
-}
-
-.chat-message.user {
-    align-self: flex-end;
-    flex-direction: row-reverse;
-}
-
-.chat-avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    margin: 0 8px;
-    object-fit: cover;
-    flex-shrink: 0;
-}
-
-.chat-bubble {
-    padding: 10px 14px;
-    border-radius: 16px;
-    font-size: 14px;
-    position: relative;
-}
-
-.chat-message.agent .chat-bubble {
-    background: #f1f5f9;
-    color: #333;
-    border-top-left-radius: 4px;
-}
-
-.chat-message.user .chat-bubble {
-    background: var(--primary);
-    color: white;
-    border-top-right-radius: 4px;
-}
-
-/* ================= NEGOTIATION UI ================= */
-.btn-circle {
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-}
-
-.grid-2-col {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-}
 /* ============================ 11. PROFILE VIEW ============================ */
 .profile-header { text-align: center; padding: 16px 0 8px; }
 .profile-avatar {
@@ -1120,16 +1073,10 @@ main::-webkit-scrollbar { display: none; }
     margin-top: 2px;
 }
 
-.upgrade-card {
-    border: 1px solid var(--primary);
-    background: var(--primary-subtle);
-}
+.upgrade-card { border: 1px solid var(--primary); background: var(--primary-subtle); }
 .upgrade-title { font-size: 15px; font-weight: 700; margin-bottom: 5px; color: var(--text-main); }
 
-.pending-card {
-    background: var(--warning-subtle);
-    border: 1px solid var(--warning);
-}
+.pending-card { background: var(--warning-subtle); border: 1px solid var(--warning); }
 .pending-title { font-size: 15px; font-weight: 700; color: var(--warning); margin-bottom: 5px; }
 
 .setting-row {
@@ -1169,13 +1116,7 @@ main::-webkit-scrollbar { display: none; }
 .toggle-switch:checked::after { transform: translateX(18px); }
 
 /* --- THEME SWITCHER --- */
-.theme-switch {
-    display: inline-block;
-    position: relative;
-    width: 54px;
-    height: 28px;
-    flex-shrink: 0;
-}
+.theme-switch { display: inline-block; position: relative; width: 54px; height: 28px; flex-shrink: 0; }
 .theme-switch input { display: none; }
 .theme-slider {
     position: absolute;
@@ -1200,8 +1141,7 @@ main::-webkit-scrollbar { display: none; }
     box-shadow: 0 2px 6px rgba(0,0,0,0.2);
     z-index: 2;
 }
-.theme-icon-light,
-.theme-icon-dark {
+.theme-icon-light, .theme-icon-dark {
     font-size: 11px;
     position: relative;
     z-index: 1;
@@ -1218,7 +1158,6 @@ main::-webkit-scrollbar { display: none; }
 [data-theme="dark"] .theme-icon-light { opacity: 1; }
 [data-theme="dark"] .theme-icon-dark { opacity: 0.4; }
 
-/* Map theme select */
 #map-theme-select {
     background: var(--bg-input);
     color: var(--text-main);
@@ -1579,12 +1518,7 @@ input[type="file"].form-input::file-selector-button {
     color: var(--text-muted);
     font-size: 13px;
 }
-.empty-state i {
-    font-size: 36px;
-    display: block;
-    margin-bottom: 10px;
-    opacity: 0.3;
-}
+.empty-state i { font-size: 36px; display: block; margin-bottom: 10px; opacity: 0.3; }
 
 /* ============================ 17. TRIPS ============================ */
 .trip-card {
@@ -1596,12 +1530,7 @@ input[type="file"].form-input::file-selector-button {
     transition: 0.2s ease;
 }
 .trip-card:hover { border-color: var(--primary); }
-.trip-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-}
+.trip-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .trip-status {
     font-size: 9px;
     font-weight: 700;
@@ -1616,31 +1545,13 @@ input[type="file"].form-input::file-selector-button {
 .trip-status.active { background: var(--primary-subtle); color: var(--primary); }
 .trip-status.ended { background: var(--border-subtle); color: var(--text-sub); }
 .trip-time { font-size: 10px; color: var(--text-muted); }
-.trip-route {
-    font-size: 12px;
-    color: var(--text-main);
-    margin: 6px 0;
-    display: flex;
-    align-items: flex-start;
-    gap: 6px;
-}
+.trip-route { font-size: 12px; color: var(--text-main); margin: 6px 0; display: flex; align-items: flex-start; gap: 6px; }
 .trip-route i { color: var(--primary); margin-top: 2px; flex-shrink: 0; }
-.trip-distance {
-    font-size: 11px;
-    color: var(--text-sub);
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin-top: 4px;
-}
+.trip-distance { font-size: 11px; color: var(--text-sub); display: flex; align-items: center; gap: 5px; margin-top: 4px; }
 .trip-distance i { color: var(--info); }
 
 /* ============================ 18. LOG VIEWER ============================ */
-.log-modal-content {
-    max-height: 85vh !important;
-    display: flex;
-    flex-direction: column;
-}
+.log-modal-content { max-height: 85vh !important; display: flex; flex-direction: column; }
 .log-content {
     flex: 1;
     background: var(--bg-input);
@@ -1666,40 +1577,20 @@ input[type="file"].form-input::file-selector-button {
 .log-error .log-msg { color: var(--danger); }
 .log-warn .log-msg { color: var(--warning); }
 .log-info .log-msg { color: var(--text-sub); }
-.log-empty {
-    text-align: center;
-    color: var(--text-muted);
-    padding: 24px 10px;
-    font-size: 12px;
-    font-style: italic;
-}
+.log-empty { text-align: center; color: var(--text-muted); padding: 24px 10px; font-size: 12px; font-style: italic; }
 .log-actions { display: flex; gap: 8px; }
 .log-actions .btn { flex: 1; }
 
 /* ============================ 19. RESPONSIVE ============================ */
 @media (min-width: 768px) {
-    .modal-content {
-        max-width: 480px;
-        border-radius: 20px;
-        margin-bottom: auto;
-        margin-top: 5vh;
-    }
+    .modal-content { max-width: 480px; border-radius: 20px; margin-bottom: auto; margin-top: 5vh; }
     .modal-overlay { align-items: center; }
     .modal-content::before { display: none; }
-    .lane-card, .post-card, .trip-card {
-        max-width: 600px;
-        margin-left: auto;
-        margin-right: auto;
-    }
-    .section-header, .hive-header, .profile-header {
-        max-width: 600px;
-        margin-left: auto;
-        margin-right: auto;
-    }
+    .lane-card, .post-card, .trip-card { max-width: 600px; margin-left: auto; margin-right: auto; }
+    .section-header, .hive-header, .profile-header { max-width: 600px; margin-left: auto; margin-right: auto; }
     .stories-container { max-width: 600px; margin-left: auto; margin-right: auto; }
 }
 
-/* Reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
         animation-duration: 0.01ms !important;
@@ -1708,7 +1599,6 @@ input[type="file"].form-input::file-selector-button {
     }
 }
 
-/* Focus visible for keyboard */
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -1719,13 +1609,9 @@ a:focus-visible {
 }
 
 /* ============================================================================
-   v14.0 EXTRAS
+   20. v14.0 — CHAT AVATARS, AGENT PROFILE, NEGOTIATION
    ============================================================================ */
 
-/* --- 1. FLEX UTILITY --- */
-.flex-1 { flex: 1; }
-
-/* --- 2. CHAT MESSAGE REDESIGN (Avatar + Bubble) --- */
 #hive-chat-view .chat-message {
     max-width: 85%;
     padding: 0;
@@ -1735,18 +1621,9 @@ a:focus-visible {
     display: flex;
     gap: 8px;
     align-items: flex-start;
-    animation: messageIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
-
-#hive-chat-view .chat-message.agent {
-    align-self: flex-start;
-    flex-direction: row;
-}
-
-#hive-chat-view .chat-message.user {
-    align-self: flex-end;
-    flex-direction: row-reverse;
-}
+#hive-chat-view .chat-message.user { align-self: flex-end; flex-direction: row-reverse; }
+#hive-chat-view .chat-message.agent { align-self: flex-start; flex-direction: row; }
 
 .chat-avatar {
     width: 32px;
@@ -1766,21 +1643,18 @@ a:focus-visible {
     word-wrap: break-word;
     position: relative;
 }
-
 .chat-message.agent .chat-bubble {
     background: var(--bg-card);
     color: var(--text-main);
     border: 1px solid var(--border-subtle);
     border-top-left-radius: 4px;
 }
-
 .chat-message.user .chat-bubble {
     background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
     color: #fff;
     border-top-right-radius: 4px;
 }
 
-/* --- 3. CHAT HEADER AVATAR --- */
 .chat-header .user-avatar {
     width: 32px !important;
     height: 32px !important;
@@ -1789,46 +1663,20 @@ a:focus-visible {
     margin-right: 8px;
 }
 
-/* --- 4. AGENT PROFILE MODAL --- */
-#agent-profile-modal .modal-content {
-    max-height: 92vh;
-    overflow-y: auto;
-}
+#agent-profile-modal .modal-content { max-height: 92vh; overflow-y: auto; }
+#agent-profile-avatar { box-shadow: 0 0 0 4px var(--primary-subtle), var(--shadow-md); background: var(--bg-card); }
+#agent-profile-modal .tag-live { font-size: 10px; padding: 4px 10px; }
+#agent-profile-modal .tag-live i.fa-shield-check { font-size: 9px; margin-right: 2px; }
 
-#agent-profile-avatar {
-    box-shadow: 0 0 0 4px var(--primary-subtle), var(--shadow-md);
-    background: var(--bg-card);
-}
-
-#agent-profile-modal .tag-live {
-    font-size: 10px;
-    padding: 4px 10px;
-}
-
-#agent-profile-modal .tag-live i.fa-shield-check {
-    font-size: 9px;
-    margin-right: 2px;
-}
-
-/* --- 5. AGENT IMAGES GALLERY --- */
 #agent-images-gallery {
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
     scroll-snap-type: x mandatory;
 }
 #agent-images-gallery::-webkit-scrollbar { display: none; }
+#agent-images-gallery > div { scroll-snap-align: start; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+#agent-images-gallery > div:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
 
-#agent-images-gallery > div {
-    scroll-snap-align: start;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-#agent-images-gallery > div:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
-}
-
-/* --- 6. NEGOTIATION STEPPER --- */
 #negotiation-modal .btn-circle {
     width: 52px;
     height: 52px;
@@ -1842,81 +1690,23 @@ a:focus-visible {
     border-radius: 50%;
     transition: transform 0.15s ease, background 0.2s ease, border-color 0.2s ease;
 }
+#negotiation-modal .btn-circle:hover { background: var(--bg-card-hover); border-color: var(--primary); color: var(--primary); }
+#negotiation-modal .btn-circle:active { transform: scale(0.92); }
+#neg-standard-fare { text-decoration: line-through; text-decoration-thickness: 2px; }
+#neg-offer-display { font-variant-numeric: tabular-nums; letter-spacing: -1px; }
 
-#negotiation-modal .btn-circle:hover {
-    background: var(--bg-card-hover);
-    border-color: var(--primary);
-    color: var(--primary);
-}
+#map-bottom-sheet .bottom-sheet { animation: slideUpSheet 0.32s cubic-bezier(0.34, 1.2, 0.64, 1); }
+#bottom-sheet-content .post-card { padding: 12px; margin-bottom: 12px; }
+#bottom-sheet-content .user-avatar { border-width: 2px; }
+#bottom-sheet-content .tag { font-size: 9px; }
 
-#negotiation-modal .btn-circle:active {
-    transform: scale(0.92);
-}
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
 
-#negotiation-modal .modal-title {
-    color: var(--text-main);
-}
+.grid-2-col > div { min-width: 0; word-wrap: break-word; }
 
-#neg-standard-fare {
-    text-decoration: line-through;
-    text-decoration-thickness: 2px;
-    text-decoration-color: var(--text-dashed, var(--text-muted));
-}
-
-#neg-offer-display {
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -1px;
-}
-
-/* --- 7. BOTTOM SHEET SLIDE ANIMATION --- */
-#map-bottom-sheet .bottom-sheet {
-    animation: slideUpSheet 0.32s cubic-bezier(0.34, 1.2, 0.64, 1);
-}
-
-/* --- 8. BOTTOM SHEET CONTENT ADJUSTMENTS --- */
-#bottom-sheet-content .post-card {
-    padding: 12px;
-    margin-bottom: 12px;
-}
-
-#bottom-sheet-content .user-avatar {
-    border-width: 2px;
-}
-
-#bottom-sheet-content .tag {
-    font-size: 9px;
-}
-
-/* --- 9. NO-SCROLLBAR UTILITY --- */
-.no-scrollbar {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-}
-.no-scrollbar::-webkit-scrollbar {
-    display: none;
-}
-
-/* --- 10. GRID-2-COL WIDTH FIX --- */
-.grid-2-col > div {
-    min-width: 0;
-    word-wrap: break-word;
-}
-
-/* --- 11. CUSTOM MAP PIN SAFETY NET --- */
-.custom-div-icon {
-    background: transparent !important;
-    border: none !important;
-}
-
-.custom-map-pin {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    cursor: pointer;
-    pointer-events: auto;
-}
-
+.custom-div-icon { background: transparent !important; border: none !important; }
+.custom-map-pin { position: relative; display: flex; flex-direction: column; align-items: center; cursor: pointer; pointer-events: auto; }
 .custom-map-pin .pin-icon {
     background: #fff;
     padding: 6px;
@@ -1928,7 +1718,6 @@ a:focus-visible {
     z-index: 2;
     position: relative;
 }
-
 .custom-map-pin .pin-label {
     background: var(--bg-elevated);
     color: var(--text-main);
@@ -1942,29 +1731,17 @@ a:focus-visible {
     position: relative;
     white-space: nowrap;
 }
+[data-theme="dark"] .custom-map-pin .pin-icon { background: var(--bg-elevated); }
 
-[data-theme="dark"] .custom-map-pin .pin-icon {
-    background: var(--bg-elevated);
-}
-
-/* --- 12. RESPONSIVE TIGHTENING FOR NEGOTIATION --- */
 @media (max-width: 380px) {
-    #negotiation-modal .btn-circle {
-        width: 46px;
-        height: 46px;
-        min-width: 46px;
-        font-size: 20px;
-    }
-    #neg-offer-display {
-        font-size: 26px !important;
-    }
+    #negotiation-modal .btn-circle { width: 46px; height: 46px; min-width: 46px; font-size: 20px; }
+    #neg-offer-display { font-size: 26px !important; }
 }
 
 /* ============================================================================
    21. v14.1 — POST DETAIL, COMMENTS, SHARE, HIVE POST ENHANCEMENTS
    ============================================================================ */
 
-/* --- 1. HIVE PHOTO PREVIEW (inside create-hive-modal) --- */
 #hive-photo-preview img {
     display: block;
     width: 100%;
@@ -1976,7 +1753,6 @@ a:focus-visible {
     box-shadow: var(--shadow-sm);
 }
 
-/* --- 2. HIVE POST CARD ENHANCEMENTS --- */
 .post-card .post-media {
     position: relative;
     border-radius: 12px;
@@ -2001,13 +1777,7 @@ a:focus-visible {
     letter-spacing: -0.2px;
 }
 
-.post-card .post-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 8px;
-}
-
+.post-card .post-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .post-tag {
     font-size: 11px;
     color: var(--primary);
@@ -2020,7 +1790,6 @@ a:focus-visible {
 }
 .post-tag:hover { background: rgba(0, 184, 138, 0.18); }
 
-/* Double-tap like heart (pop-in) */
 .post-media .like-heart {
     position: absolute;
     top: 50%; left: 50%;
@@ -2032,12 +1801,8 @@ a:focus-visible {
     text-shadow: 0 4px 18px rgba(0,0,0,0.4);
     transition: transform 0.25s ease, opacity 0.25s ease;
 }
-.post-media.liked .like-heart {
-    transform: translate(-50%, -50%) scale(1);
-    opacity: 1;
-}
+.post-media.liked .like-heart { transform: translate(-50%, -50%) scale(1); opacity: 1; }
 
-/* --- 3. POST ACTIONS — engagement bar --- */
 .post-actions {
     display: flex;
     justify-content: space-between;
@@ -2064,185 +1829,50 @@ a:focus-visible {
 .post-action:hover { color: var(--primary); background: var(--primary-subtle); }
 .post-action:active { transform: scale(0.96); }
 .post-action i { font-size: 15px; }
-
 .post-action.liked { color: #e11d48; }
 .post-action.liked i { animation: heartPop 0.35s cubic-bezier(0.68, -0.55, 0.265, 1.55); }
-
 @keyframes heartPop {
     0% { transform: scale(1); }
     50% { transform: scale(1.35); }
     100% { transform: scale(1); }
 }
 
-/* --- 4. POST DETAIL MODAL --- */
-#post-detail-modal .modal-content {
-    max-height: 92vh;
-    overflow-y: auto;
-    padding-bottom: 12px;
-}
-
-#post-detail-content .pd-author {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
-}
-#post-detail-content .pd-author img {
-    width: 42px; height: 42px;
-    border-radius: 50%;
-    object-fit: cover;
-    border: 2px solid var(--primary);
-}
-#post-detail-content .pd-author .pd-name {
-    font-size: 14px; font-weight: 700; color: var(--text-main);
-    line-height: 1.2;
-}
-#post-detail-content .pd-author .pd-time {
-    font-size: 11px; color: var(--text-sub);
-}
-
-#post-detail-content .pd-media {
-    border-radius: 14px;
-    overflow: hidden;
-    background: var(--bg-dark);
-    margin-bottom: 12px;
-}
+#post-detail-modal .modal-content { max-height: 92vh; overflow-y: auto; padding-bottom: 12px; }
+#post-detail-content .pd-author { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+#post-detail-content .pd-author img { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; border: 2px solid var(--primary); }
+#post-detail-content .pd-author .pd-name { font-size: 14px; font-weight: 700; color: var(--text-main); line-height: 1.2; }
+#post-detail-content .pd-author .pd-time { font-size: 11px; color: var(--text-sub); }
+#post-detail-content .pd-media { border-radius: 14px; overflow: hidden; background: var(--bg-dark); margin-bottom: 12px; }
 #post-detail-content .pd-media img,
-#post-detail-content .pd-media video {
-    display: block;
-    width: 100%;
-    max-height: 460px;
-    object-fit: cover;
-}
+#post-detail-content .pd-media video { display: block; width: 100%; max-height: 460px; object-fit: cover; }
+#post-detail-content .pd-title { font-size: 17px; font-weight: 800; color: var(--text-main); margin-bottom: 6px; letter-spacing: -0.3px; }
+#post-detail-content .pd-text { font-size: 14px; line-height: 1.55; color: var(--text-main); margin-bottom: 10px; white-space: pre-wrap; word-wrap: break-word; }
+#post-detail-content .pd-actions { display: flex; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border-subtle); margin-top: 4px; }
 
-#post-detail-content .pd-title {
-    font-size: 17px;
-    font-weight: 800;
-    color: var(--text-main);
-    margin-bottom: 6px;
-    letter-spacing: -0.3px;
-}
-#post-detail-content .pd-text {
-    font-size: 14px;
-    line-height: 1.55;
-    color: var(--text-main);
-    margin-bottom: 10px;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-}
-#post-detail-content .pd-actions {
-    display: flex;
-    gap: 6px;
-    padding-top: 10px;
-    border-top: 1px solid var(--border-subtle);
-    margin-top: 4px;
-}
-
-/* --- 5. COMMENTS LIST (used in post-detail-modal) --- */
-.pd-comment {
-    display: flex;
-    gap: 10px;
-    padding: 10px 0;
-    border-bottom: 1px solid var(--border-subtle);
-    animation: commentIn 0.25s ease;
-}
+.pd-comment { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); animation: commentIn 0.25s ease; }
 .pd-comment:last-child { border-bottom: none; }
-
-@keyframes commentIn {
-    from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-.pd-comment img {
-    width: 32px; height: 32px;
-    border-radius: 50%;
-    object-fit: cover;
-    flex-shrink: 0;
-    border: 2px solid var(--bg-card);
-    background: var(--bg-card);
-}
+@keyframes commentIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.pd-comment img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 2px solid var(--bg-card); background: var(--bg-card); }
 .pd-comment .pd-comment-body { flex: 1; min-width: 0; }
-.pd-comment .pd-comment-name {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--text-main);
-    margin-bottom: 2px;
-}
-.pd-comment .pd-comment-text {
-    font-size: 13px;
-    color: var(--text-main);
-    line-height: 1.45;
-    word-wrap: break-word;
-    white-space: pre-wrap;
-}
-.pd-comment .pd-comment-time {
-    font-size: 10px;
-    color: var(--text-muted);
-    margin-top: 3px;
-}
-.pd-comment .pd-comment-delete {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 12px;
-    padding: 4px;
-    flex-shrink: 0;
-    transition: color 0.15s ease;
-}
+.pd-comment .pd-comment-name { font-size: 12px; font-weight: 700; color: var(--text-main); margin-bottom: 2px; }
+.pd-comment .pd-comment-text { font-size: 13px; color: var(--text-main); line-height: 1.45; word-wrap: break-word; white-space: pre-wrap; }
+.pd-comment .pd-comment-time { font-size: 10px; color: var(--text-muted); margin-top: 3px; }
+.pd-comment .pd-comment-delete { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 12px; padding: 4px; flex-shrink: 0; transition: color 0.15s ease; }
 .pd-comment .pd-comment-delete:hover { color: var(--danger); }
+.pd-comments-empty { text-align: center; font-size: 12px; color: var(--text-sub); padding: 20px; font-style: italic; }
 
-.pd-comments-empty {
-    text-align: center;
-    font-size: 12px;
-    color: var(--text-sub);
-    padding: 20px;
-    font-style: italic;
-}
+#share-modal .modal-content { padding-bottom: 22px; }
+#share-modal .form-input[readonly] { background: var(--bg-card); color: var(--text-sub); cursor: text; font-size: 12px; font-family: 'SF Mono', 'Courier New', Consolas, monospace; }
+#share-modal button[onclick^="shareTo"] { transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease; }
+#share-modal button[onclick^="shareTo"]:hover { transform: translateY(-2px); border-color: var(--primary); background: var(--primary-subtle); }
+#share-modal button[onclick^="shareTo"]:active { transform: scale(0.96); }
 
-/* --- 6. SHARE MODAL --- */
-#share-modal .modal-content {
-    padding-bottom: 22px;
-}
-
-#share-modal .form-input[readonly] {
-    background: var(--bg-card);
-    color: var(--text-sub);
-    cursor: text;
-    font-size: 12px;
-    font-family: 'SF Mono', 'Courier New', Consolas, monospace;
-}
-
-#share-modal button[onclick^="shareTo"] {
-    transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-#share-modal button[onclick^="shareTo"]:hover {
-    transform: translateY(-2px);
-    border-color: var(--primary);
-    background: var(--primary-subtle);
-}
-#share-modal button[onclick^="shareTo"]:active {
-    transform: scale(0.96);
-}
-
-/* --- 7. COMMENT MODAL --- */
-#comment-modal textarea.form-input {
-    min-height: 90px;
-    resize: vertical;
-    line-height: 1.5;
-}
-
-#comment-submit-btn {
-    position: relative;
-}
-#comment-submit-btn.loading {
-    pointer-events: none;
-    opacity: 0.75;
-}
+#comment-modal textarea.form-input { min-height: 90px; resize: vertical; line-height: 1.5; }
+#comment-submit-btn { position: relative; }
+#comment-submit-btn.loading { pointer-events: none; opacity: 0.75; }
 #comment-submit-btn.loading::after {
     content: '';
-    width: 14px;
-    height: 14px;
+    width: 14px; height: 14px;
     border: 2px solid rgba(255,255,255,0.4);
     border-top-color: #fff;
     border-radius: 50%;
@@ -2252,14 +1882,7 @@ a:focus-visible {
     vertical-align: middle;
 }
 
-/* --- 8. SKELETON FOR POSTS (while listHive loads) --- */
-.post-skeleton {
-    background: var(--bg-card);
-    border-radius: 16px;
-    padding: 14px;
-    margin-bottom: 12px;
-    border: 1px solid var(--border-subtle);
-}
+.post-skeleton { background: var(--bg-card); border-radius: 16px; padding: 14px; margin-bottom: 12px; border: 1px solid var(--border-subtle); }
 .post-skeleton .sk-line {
     height: 12px;
     border-radius: 6px;
@@ -2279,25 +1902,17 @@ a:focus-visible {
     margin: 10px 0;
 }
 
-/* --- 9. TINY SCREEN TWEAKS FOR POST DETAIL --- */
 @media (max-width: 380px) {
     #post-detail-content .pd-title { font-size: 15px; }
     #post-detail-content .pd-text { font-size: 13px; }
     .pd-comment img { width: 28px; height: 28px; }
 }
 
-/* --- 10. LIGHTBOX FOR POST IMAGES (optional) --- */
 .post-image img,
-.pd-media img {
-    cursor: zoom-in;
-    transition: transform 0.25s ease;
-}
+.pd-media img { cursor: zoom-in; transition: transform 0.25s ease; }
 .post-image img:active,
-.pd-media img:active {
-    transform: scale(0.99);
-}
+.pd-media img:active { transform: scale(0.99); }
 
-/* --- 11. HASH-LINK HIGHLIGHT (when opened via #hive/<id>) --- */
 .post-card.highlighted {
     outline: 2px solid var(--primary);
     outline-offset: 2px;
@@ -2306,4 +1921,194 @@ a:focus-visible {
 @keyframes highlightPulse {
     0%, 100% { box-shadow: var(--shadow-sm); }
     50% { box-shadow: 0 0 0 6px var(--primary-subtle), var(--shadow-lg); }
+}
+
+/* ============================================================================
+   22. v15.0 — QUICK PIN SHEET, DEPARTURE COUNTDOWN,
+                   MAP CONTROL BAR, CLICKABLE AVATARS, UPI PAY LINK
+   ============================================================================ */
+
+/* --- 22.1 QUICK PIN SHEET --- */
+#quick-pin-sheet .bottom-sheet {
+    animation: slideUpSheet 0.32s cubic-bezier(0.34, 1.2, 0.64, 1);
+}
+#quick-pin-sheet .grid-2-col {
+    gap: 10px;
+}
+#quick-pin-sheet .grid-2-col .btn {
+    padding: 14px 12px;
+    font-size: 13px;
+    justify-content: flex-start;
+    flex-direction: row;
+    gap: 10px;
+}
+#quick-pin-sheet .grid-2-col .btn i {
+    font-size: 16px;
+    color: var(--primary);
+    flex-shrink: 0;
+}
+#qp-coords {
+    font-family: 'SF Mono', 'Courier New', Consolas, monospace;
+    letter-spacing: 0.3px;
+}
+
+/* --- 22.2 DEPARTURE COUNTDOWN CARD (used in Create Lane modal) --- */
+.qp-countdown {
+    background: linear-gradient(135deg, var(--primary-subtle) 0%, rgba(0,184,138,0.05) 100%);
+    border: 1px solid var(--primary);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin: 6px 0 14px;
+    text-align: center;
+    animation: fadeIn 0.3s ease;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+.qp-countdown-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--text-sub);
+    margin-bottom: 8px;
+}
+.qp-countdown-value {
+    font-family: 'SF Mono', 'Courier New', Consolas, monospace;
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    color: var(--primary);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.qp-countdown-hint {
+    font-size: 11px;
+    color: var(--text-sub);
+    margin-top: 8px;
+    font-weight: 600;
+}
+
+.qp-countdown.urgent {
+    border-color: var(--danger);
+    background: linear-gradient(135deg, var(--danger-subtle) 0%, rgba(239,68,68,0.03) 100%);
+    animation: qpPulseUrgent 1.5s infinite;
+}
+.qp-countdown.urgent .qp-countdown-value { color: var(--danger); }
+.qp-countdown.urgent .qp-countdown-hint { color: var(--danger); }
+
+@keyframes qpPulseUrgent {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+    50%      { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+}
+
+.qp-countdown.soon {
+    border-color: var(--warning);
+    background: linear-gradient(135deg, var(--warning-subtle) 0%, rgba(245,158,11,0.03) 100%);
+}
+.qp-countdown.soon .qp-countdown-value { color: var(--warning); }
+
+.qp-countdown.expired {
+    border-color: var(--border-color);
+    background: var(--bg-card);
+}
+.qp-countdown.expired .qp-countdown-value {
+    color: var(--text-muted);
+    font-size: 20px;
+}
+
+@media (max-width: 380px) {
+    .qp-countdown-value { font-size: 24px; letter-spacing: 1px; }
+}
+
+/* --- 22.3 MAP CONTROL BAR (Refresh / Recenter / Enable GPS) --- */
+/* (main styling lives above in .map-top-right — this is polish) */
+#btn-enable-gps.tracking i::before {
+    content: "\f3c5"; /* fa-location-dot — same as default but stays for clarity */
+}
+#btn-enable-gps.tracking {
+    color: var(--primary);
+    background: var(--primary-subtle) !important;
+}
+
+/* GPS button pulses while a fresh fix is being acquired */
+#btn-enable-gps.locating {
+    animation: gpsLocating 1.2s ease infinite;
+}
+@keyframes gpsLocating {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+}
+
+/* --- 22.4 CLICKABLE AVATARS --- */
+/* Applied automatically by JS to every avatar with data-user-phone */
+img.user-avatar[data-user-phone],
+img.driver-avatar[data-user-phone],
+img.chat-avatar[data-user-phone] {
+    cursor: pointer;
+    transition: transform 0.15s ease, filter 0.15s ease;
+}
+img.user-avatar[data-user-phone]:hover,
+img.driver-avatar[data-user-phone]:hover,
+img.chat-avatar[data-user-phone]:hover {
+    transform: scale(1.06);
+    filter: brightness(1.05);
+}
+img.user-avatar[data-user-phone]:active,
+img.driver-avatar[data-user-phone]:active,
+img.chat-avatar[data-user-phone]:active {
+    transform: scale(0.97);
+}
+
+/* --- 22.5 UPI PAY LINK inside chat bubbles --- */
+.upi-pay-link {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+    color: #fff !important;
+    padding: 8px 18px;
+    border-radius: 10px;
+    text-decoration: none !important;
+    font-weight: 800;
+    font-size: 12px;
+    letter-spacing: 0.3px;
+    box-shadow: 0 4px 12px var(--primary-glow);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.upi-pay-link:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px var(--primary-glow);
+}
+.upi-pay-link:active {
+    transform: scale(0.97);
+}
+/* When the pay link is inside an outgoing bubble, invert colors */
+.chat-message.user .upi-pay-link {
+    background: #fff;
+    color: var(--primary) !important;
+}
+
+/* --- 22.6 USER PROFILE MODAL (opened from any avatar click) --- */
+#user-profile-modal .modal-content {
+    max-height: 92vh;
+    overflow-y: auto;
+}
+#user-profile-avatar {
+    box-shadow: 0 0 0 4px var(--primary-subtle), var(--shadow-md);
+    background: var(--bg-card);
+}
+#user-profile-modal .tag-live {
+    font-size: 11px;
+    padding: 5px 12px;
+}
+#user-profile-modal .post-card {
+    padding: 14px;
+}
+
+/* --- 22.7 MISC POLISH --- */
+/* Reduce the top-right control-bar gap slightly on very small phones */
+@media (max-width: 360px) {
+    .map-top-right { padding: 4px; gap: 6px; }
+    .map-top-right .map-ctrl-btn { width: 34px; height: 34px; font-size: 14px; }
 }
