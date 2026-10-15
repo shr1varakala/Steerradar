@@ -1,15 +1,13 @@
 /* ============================================================================
-   STEERADAR LOGGER (v2.0)
+   STEERADAR LOGGER (v2.1)
    ============================================================================
-   Features:
-     • Levels: log / info / warn / error / success
-     • In-memory buffer (max 500) + localStorage persistence
-     • Live render into #logContent when log modal is open
-     • Fetch interceptor → logs every failed code.gs call with action + status
-     • Global window.onerror + unhandledrejection capture
-     • Exposed on window.logger so inline onclick handlers work
-     • Copy-to-clipboard with HTTP fallback
-     • Clear button wipes both memory and localStorage
+   v2.1 changes:
+     • Added logger.init()  — no-op for backward compat (app.js calls it)
+     • Added logger.render() — alias for refresh()
+     • Sanitize every entry loaded from localStorage (old versions wrote
+       entries without a valid `ts`, causing "Invalid time value" crashes)
+     • safeTs() guards all Date construction
+     • Every log method accepts any number of args
    ============================================================================ */
 
 const STORAGE_KEY = 'steeradar-log';
@@ -21,13 +19,43 @@ let entries = [];
 let renderTimer = null;
 let isBound = false;
 
-/* --------------------------- BOOTSTRAP --------------------------- */
+/* --------------------------- SAFE DATE --------------------------- */
+/**
+ * Return a valid millisecond timestamp.
+ * Accepts: number | numeric string | ISO string | anything
+ * Falls back to Date.now() if the input can't be parsed.
+ */
+function safeTs(v) {
+  if (v == null || v === '') return Date.now();
+  if (typeof v === 'number' && isFinite(v) && v > 0) return v;
+  const n = Number(v);
+  if (isFinite(n) && n > 0 && n < 1e15) return n;
+  const d = new Date(v);
+  const t = d.getTime();
+  if (isFinite(t)) return t;
+  return Date.now();
+}
+
+/* --------------------------- LOAD / SAVE --------------------------- */
 function loadFromStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+
+    const VALID_LEVELS = ['info', 'warn', 'error', 'success'];
+
+    return parsed
+      .filter(function (e) { return e && typeof e === 'object'; })
+      .map(function (e) {
+        return {
+          ts: safeTs(e.ts),
+          level: VALID_LEVELS.indexOf(e.level) >= 0 ? e.level : 'info',
+          msg: String(e.msg == null ? '' : e.msg).slice(0, 4000)
+        };
+      })
+      .slice(-MAX_ENTRIES);
   } catch (e) {
     return [];
   }
@@ -35,18 +63,18 @@ function loadFromStorage() {
 
 function saveToStorage() {
   try {
-    // Keep the buffer bounded before persisting
     const trimmed = entries.slice(-MAX_ENTRIES);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
-  } catch (e) {
-    // Storage full or unavailable — silently ignore
-  }
+  } catch (e) { /* quota / private mode — ignore */ }
 }
 
 entries = loadFromStorage();
 
 /* --------------------------- HELPERS --------------------------- */
-function pad2(n) { return String(n).padStart(2, '0'); }
+function pad2(n) {
+  const v = Number(n);
+  return (isFinite(v) ? String(Math.floor(v)) : '00').padStart(2, '0');
+}
 
 function timeStamp() {
   const d = new Date();
@@ -87,12 +115,11 @@ function addEntry(level, args) {
     entries = entries.slice(-MAX_ENTRIES);
   }
 
-  // Mirror to console with original args (keeps stack traces intact)
   try {
     if (level === 'error') console.error.apply(console, args);
     else if (level === 'warn') console.warn.apply(console, args);
     else console.log.apply(console, args);
-  } catch (e) { /* console may be unavailable */ }
+  } catch (e) {}
 
   saveToStorage();
   scheduleRender();
@@ -116,12 +143,11 @@ function renderNow() {
     return;
   }
 
-  // Newest entries at the top for easier reading
   const html = entries
     .slice()
     .reverse()
     .map(function (e) {
-      const d = new Date(e.ts);
+      const d = new Date(safeTs(e.ts));
       const stamp =
         pad2(d.getHours()) + ':' +
         pad2(d.getMinutes()) + ':' +
@@ -141,16 +167,30 @@ function renderNow() {
 
 /* --------------------------- PUBLIC API --------------------------- */
 export const logger = {
-  log:   function () { addEntry('info',    arguments); },
-  info:  function () { addEntry('info',    arguments); },
-  warn:  function () { addEntry('warn',    arguments); },
-  error: function () { addEntry('error',   arguments); },
-  success: function () { addEntry('info',  arguments); },
 
-  /* Return a plain array of entries (safe copy) */
+  /* v14 backward-compat: app.js calls logger.init() on boot */
+  init: function () {
+    // Bind global error handlers if not already bound
+    bindGlobalHandlers();
+    // Render if modal is already open
+    if (logModalIsOpen()) renderNow();
+    return { ok: true };
+  },
+
+  log:     function () { addEntry('info',    arguments); },
+  info:    function () { addEntry('info',    arguments); },
+  warn:    function () { addEntry('warn',    arguments); },
+  error:   function () { addEntry('error',   arguments); },
+  success: function () { addEntry('info',    arguments); },
+
+  /* v14 backward-compat: app.js calls logger.render() */
+  render: function () { renderNow(); return { ok: true }; },
+
+  /* Clearer alias (my v2.0 naming) */
+  refresh: function () { renderNow(); return { ok: true }; },
+
   getAll: function () { return entries.slice(); },
 
-  /* Wipe memory + storage + UI */
   clear: function () {
     entries = [];
     try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
@@ -158,26 +198,21 @@ export const logger = {
     return { ok: true };
   },
 
-  /* Export as plain text (used by Copy button) */
   export: async function () {
     const text = entries.map(function (e) {
-      const d = new Date(e.ts);
+      const d = new Date(safeTs(e.ts));
       const iso = d.toISOString();
       return '[' + iso + '] [' + (e.level || 'info').toUpperCase() + '] ' + e.msg;
     }).join('\n');
 
-    // Try clipboard API first (needs HTTPS + permission)
     try {
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text || '(no logs)');
         logger.success('Log copied to clipboard');
         return { ok: true };
       }
-    } catch (e) {
-      // fall through to legacy method
-    }
+    } catch (e) {}
 
-    // Legacy fallback — hidden textarea
     try {
       const ta = document.createElement('textarea');
       ta.value = text || '(no logs)';
@@ -190,14 +225,10 @@ export const logger = {
       logger.success('Log copied to clipboard');
       return { ok: true };
     } catch (e) {
-      // Last resort — show prompt so user can copy manually
       try { window.prompt('Copy logs:', text || '(no logs)'); } catch (e2) {}
       return { ok: false };
     }
-  },
-
-  /* Force a re-render (called when the log modal opens) */
-  refresh: function () { renderNow(); }
+  }
 };
 
 /* --------------------------- GLOBAL BINDINGS --------------------------- */
@@ -205,35 +236,31 @@ function bindGlobalHandlers() {
   if (isBound) return;
   isBound = true;
 
-  // Uncaught errors
   window.addEventListener('error', function (evt) {
     const msg = evt && (evt.message || (evt.error && evt.error.message));
     const src = evt && evt.filename ? (' @ ' + evt.filename + ':' + (evt.lineno || 0)) : '';
     if (msg) addEntry('error', ['[uncaught] ' + msg + src]);
   });
 
-  // Unhandled promise rejections
   window.addEventListener('unhandledrejection', function (evt) {
     const reason = evt && evt.reason;
     const msg = reason && (reason.message || reason.stack || String(reason));
     if (msg) addEntry('error', ['[unhandled promise] ' + msg]);
   });
 
-  // Intercept fetch → log every non-OK response (esp. code.gs calls)
   const nativeFetch = window.fetch;
   if (nativeFetch && !nativeFetch.__steerWrapped) {
     const wrapped = function (input, init) {
       const url = (typeof input === 'string') ? input : (input && input.url) || '';
       const isApi = url.indexOf('script.google.com') !== -1 || url.indexOf('/macros/') !== -1;
 
-      // Try to extract action name from POST body
       let action = '';
       try {
         if (init && init.body && typeof init.body === 'string') {
           const parsed = JSON.parse(init.body);
           action = parsed && parsed.action ? String(parsed.action) : '';
         }
-      } catch (e) { /* not JSON */ }
+      } catch (e) {}
 
       return nativeFetch.apply(this, arguments)
         .then(function (res) {
@@ -255,16 +282,13 @@ function bindGlobalHandlers() {
 }
 
 /* --------------------------- EXPOSE GLOBALLY --------------------------- */
-// Inline onclick handlers in index.html (logger.export(), logger.clear())
-// need the API on window since this file is an ES module.
 if (typeof window !== 'undefined') {
   window.logger = logger;
 }
 
-/* --------------------------- INIT --------------------------- */
+/* --------------------------- AUTO-INIT --------------------------- */
 bindGlobalHandlers();
 
-// Render on load if the modal somehow starts visible
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', function () {
     if (logModalIsOpen()) renderNow();
@@ -273,8 +297,6 @@ if (document.readyState === 'loading') {
   if (logModalIsOpen()) renderNow();
 }
 
-// Auto-render whenever the log modal opens (via MutationObserver).
-// This catches `openModal('log-modal')` regardless of caller.
 (function watchLogModal() {
   function attach() {
     const modal = document.getElementById('log-modal');
@@ -291,7 +313,6 @@ if (document.readyState === 'loading') {
   }
 })();
 
-/* --------------------------- SELF-TEST --------------------------- */
-logger.info('Logger v2.0 initialized — ' + entries.length + ' entries restored');
+logger.info('Logger v2.1 initialized — ' + entries.length + ' entries restored');
 
 export default logger;
