@@ -1,144 +1,297 @@
-// js/logger.js — In-app logger. Captures console + errors + fetch failures.
-// Opens via long-press on the logo. Exports log to clipboard.
+/* ============================================================================
+   STEERADAR LOGGER (v2.0)
+   ============================================================================
+   Features:
+     • Levels: log / info / warn / error / success
+     • In-memory buffer (max 500) + localStorage persistence
+     • Live render into #logContent when log modal is open
+     • Fetch interceptor → logs every failed code.gs call with action + status
+     • Global window.onerror + unhandledrejection capture
+     • Exposed on window.logger so inline onclick handlers work
+     • Copy-to-clipboard with HTTP fallback
+     • Clear button wipes both memory and localStorage
+   ============================================================================ */
 
-const MAX_BUFFER = 300;
 const STORAGE_KEY = 'steeradar-log';
-const buffer = [];
+const MAX_ENTRIES = 500;
+const RENDER_DEBOUNCE_MS = 120;
 
-// Restore from storage on load
-try {
-  const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-  if (Array.isArray(saved)) buffer.push(...saved);
-} catch {}
+/* --------------------------- STATE --------------------------- */
+let entries = [];
+let renderTimer = null;
+let isBound = false;
 
-function push(level, args) {
-  const msg = args.map(a => {
-    if (typeof a === 'string') return a;
-    if (a instanceof Error) return a.message + '\n' + (a.stack || '');
-    try { return JSON.stringify(a); } catch { return String(a); }
-  }).join(' ');
-
-  buffer.push({ t: Date.now(), level, msg });
-  if (buffer.length > MAX_BUFFER) buffer.shift();
-
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(buffer.slice(-100))); } catch {}
-}
-
-export function initLogger() {
-  // Patch console methods
-  const orig = {
-    log:   console.log.bind(console),
-    warn:  console.warn.bind(console),
-    error: console.error.bind(console),
-    info:  console.info.bind(console),
-  };
-
-  ['log', 'warn', 'error', 'info'].forEach(k => {
-    console[k] = (...args) => {
-      push(k === 'log' ? 'info' : k, args);
-      orig[k](...args);
-    };
-  });
-
-  // Uncaught errors
-  window.addEventListener('error', (e) => {
-    push('error', ['[uncaught]', e.message, `${e.filename}:${e.lineno}`]);
-  });
-
-  // Unhandled promise rejections
-  window.addEventListener('unhandledrejection', (e) => {
-    push('error', ['[unhandled]', e.reason?.message || String(e.reason)]);
-  });
-
-  // Intercept fetch to log failures + non-OK responses
-  const origFetch = window.fetch;
-  window.fetch = async (...args) => {
-    const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || 'unknown');
-    try {
-      const res = await origFetch(...args);
-      if (!res.ok) push('warn', ['[fetch]', res.status, url.slice(0, 80)]);
-      return res;
-    } catch (err) {
-      push('error', ['[fetch]', 'FAILED', url.slice(0, 80), err.message]);
-      throw err;
-    }
-  };
-
-  push('info', ['Logger initialized']);
-}
-
-export function renderLogViewer() {
-  const el = document.getElementById('logContent');
-  if (!el) return;
-
-  const entries = buffer.slice().reverse();
-
-  if (!entries.length) {
-    el.innerHTML = '<div class="log-empty">No logs yet.</div>';
-    return;
-  }
-
-  el.innerHTML = entries.map(e => {
-    const time = new Date(e.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const cls = e.level === 'error' ? 'log-error'
-              : e.level === 'warn' ? 'log-warn'
-              : 'log-info';
-    return `<div class="log-line ${cls}">
-      <span class="log-time">${time}</span>
-      <span class="log-msg">${escapeHtml(e.msg)}</span>
-    </div>`;
-  }).join('');
-}
-
-export function clearLog() {
-  buffer.length = 0;
-  try { localStorage.removeItem(STORAGE_KEY); } catch {}
-  renderLogViewer();
-}
-
-export function getLogText() {
-  return buffer
-    .map(e => `[${new Date(e.t).toISOString()}] [${e.level}] ${e.msg}`)
-    .join('\n');
-}
-
-export function exportLog() {
-  const text = getLogText() || '(empty)';
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(text)
-      .then(() => window.Steeradar?.showToast?.('Log copied to clipboard', 'success'))
-      .catch(() => fallbackCopy(text));
-  } else {
-    fallbackCopy(text);
-  }
-}
-
-function fallbackCopy(text) {
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.position = 'fixed';
-  ta.style.opacity = '0';
-  document.body.appendChild(ta);
-  ta.select();
+/* --------------------------- BOOTSTRAP --------------------------- */
+function loadFromStorage() {
   try {
-    document.execCommand('copy');
-    window.Steeradar?.showToast?.('Log copied', 'success');
-  } catch {
-    window.Steeradar?.showToast?.('Copy failed');
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
   }
-  document.body.removeChild(ta);
+}
+
+function saveToStorage() {
+  try {
+    // Keep the buffer bounded before persisting
+    const trimmed = entries.slice(-MAX_ENTRIES);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
+  } catch (e) {
+    // Storage full or unavailable — silently ignore
+  }
+}
+
+entries = loadFromStorage();
+
+/* --------------------------- HELPERS --------------------------- */
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+function timeStamp() {
+  const d = new Date();
+  return (
+    pad2(d.getHours()) + ':' +
+    pad2(d.getMinutes()) + ':' +
+    pad2(d.getSeconds()) + '.' +
+    String(d.getMilliseconds()).padStart(3, '0')
+  );
 }
 
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[c]));
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
 }
 
+function normalizeArg(v) {
+  if (v == null) return String(v);
+  if (typeof v === 'string') return v;
+  if (v instanceof Error) return v.stack || (v.name + ': ' + v.message);
+  try { return JSON.stringify(v); }
+  catch (e) { return String(v); }
+}
+
+function logModalIsOpen() {
+  const el = document.getElementById('log-modal');
+  return !!el && !el.classList.contains('hidden');
+}
+
+/* --------------------------- CORE LOG --------------------------- */
+function addEntry(level, args) {
+  const text = Array.from(args).map(normalizeArg).join(' ');
+  const entry = { ts: Date.now(), level: level || 'info', msg: text };
+  entries.push(entry);
+
+  if (entries.length > MAX_ENTRIES) {
+    entries = entries.slice(-MAX_ENTRIES);
+  }
+
+  // Mirror to console with original args (keeps stack traces intact)
+  try {
+    if (level === 'error') console.error.apply(console, args);
+    else if (level === 'warn') console.warn.apply(console, args);
+    else console.log.apply(console, args);
+  } catch (e) { /* console may be unavailable */ }
+
+  saveToStorage();
+  scheduleRender();
+}
+
+/* --------------------------- RENDER --------------------------- */
+function scheduleRender() {
+  if (renderTimer) return;
+  renderTimer = setTimeout(function () {
+    renderTimer = null;
+    if (logModalIsOpen()) renderNow();
+  }, RENDER_DEBOUNCE_MS);
+}
+
+function renderNow() {
+  const box = document.getElementById('logContent');
+  if (!box) return;
+
+  if (!entries.length) {
+    box.innerHTML = '<div class="log-empty">No logs yet.</div>';
+    return;
+  }
+
+  // Newest entries at the top for easier reading
+  const html = entries
+    .slice()
+    .reverse()
+    .map(function (e) {
+      const d = new Date(e.ts);
+      const stamp =
+        pad2(d.getHours()) + ':' +
+        pad2(d.getMinutes()) + ':' +
+        pad2(d.getSeconds());
+      const level = e.level || 'info';
+      return (
+        '<div class="log-line log-' + escapeHtml(level) + '">' +
+          '<span class="log-time">' + stamp + '</span>' +
+          '<span class="log-msg">' + escapeHtml(e.msg) + '</span>' +
+        '</div>'
+      );
+    })
+    .join('');
+
+  box.innerHTML = html;
+}
+
+/* --------------------------- PUBLIC API --------------------------- */
 export const logger = {
-  init: initLogger,
-  render: renderLogViewer,
-  clear: clearLog,
-  export: exportLog,
-  getText: getLogText,
+  log:   function () { addEntry('info',    arguments); },
+  info:  function () { addEntry('info',    arguments); },
+  warn:  function () { addEntry('warn',    arguments); },
+  error: function () { addEntry('error',   arguments); },
+  success: function () { addEntry('info',  arguments); },
+
+  /* Return a plain array of entries (safe copy) */
+  getAll: function () { return entries.slice(); },
+
+  /* Wipe memory + storage + UI */
+  clear: function () {
+    entries = [];
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    renderNow();
+    return { ok: true };
+  },
+
+  /* Export as plain text (used by Copy button) */
+  export: async function () {
+    const text = entries.map(function (e) {
+      const d = new Date(e.ts);
+      const iso = d.toISOString();
+      return '[' + iso + '] [' + (e.level || 'info').toUpperCase() + '] ' + e.msg;
+    }).join('\n');
+
+    // Try clipboard API first (needs HTTPS + permission)
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text || '(no logs)');
+        logger.success('Log copied to clipboard');
+        return { ok: true };
+      }
+    } catch (e) {
+      // fall through to legacy method
+    }
+
+    // Legacy fallback — hidden textarea
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text || '(no logs)';
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      logger.success('Log copied to clipboard');
+      return { ok: true };
+    } catch (e) {
+      // Last resort — show prompt so user can copy manually
+      try { window.prompt('Copy logs:', text || '(no logs)'); } catch (e2) {}
+      return { ok: false };
+    }
+  },
+
+  /* Force a re-render (called when the log modal opens) */
+  refresh: function () { renderNow(); }
 };
+
+/* --------------------------- GLOBAL BINDINGS --------------------------- */
+function bindGlobalHandlers() {
+  if (isBound) return;
+  isBound = true;
+
+  // Uncaught errors
+  window.addEventListener('error', function (evt) {
+    const msg = evt && (evt.message || (evt.error && evt.error.message));
+    const src = evt && evt.filename ? (' @ ' + evt.filename + ':' + (evt.lineno || 0)) : '';
+    if (msg) addEntry('error', ['[uncaught] ' + msg + src]);
+  });
+
+  // Unhandled promise rejections
+  window.addEventListener('unhandledrejection', function (evt) {
+    const reason = evt && evt.reason;
+    const msg = reason && (reason.message || reason.stack || String(reason));
+    if (msg) addEntry('error', ['[unhandled promise] ' + msg]);
+  });
+
+  // Intercept fetch → log every non-OK response (esp. code.gs calls)
+  const nativeFetch = window.fetch;
+  if (nativeFetch && !nativeFetch.__steerWrapped) {
+    const wrapped = function (input, init) {
+      const url = (typeof input === 'string') ? input : (input && input.url) || '';
+      const isApi = url.indexOf('script.google.com') !== -1 || url.indexOf('/macros/') !== -1;
+
+      // Try to extract action name from POST body
+      let action = '';
+      try {
+        if (init && init.body && typeof init.body === 'string') {
+          const parsed = JSON.parse(init.body);
+          action = parsed && parsed.action ? String(parsed.action) : '';
+        }
+      } catch (e) { /* not JSON */ }
+
+      return nativeFetch.apply(this, arguments)
+        .then(function (res) {
+          if (!res.ok && isApi) {
+            addEntry('warn', ['API ' + (action || url) + ' → HTTP ' + res.status]);
+          }
+          return res;
+        })
+        .catch(function (err) {
+          if (isApi) {
+            addEntry('error', ['API ' + (action || url) + ' → network error: ' + (err && err.message ? err.message : err)]);
+          }
+          throw err;
+        });
+    };
+    wrapped.__steerWrapped = true;
+    window.fetch = wrapped;
+  }
+}
+
+/* --------------------------- EXPOSE GLOBALLY --------------------------- */
+// Inline onclick handlers in index.html (logger.export(), logger.clear())
+// need the API on window since this file is an ES module.
+if (typeof window !== 'undefined') {
+  window.logger = logger;
+}
+
+/* --------------------------- INIT --------------------------- */
+bindGlobalHandlers();
+
+// Render on load if the modal somehow starts visible
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', function () {
+    if (logModalIsOpen()) renderNow();
+  });
+} else {
+  if (logModalIsOpen()) renderNow();
+}
+
+// Auto-render whenever the log modal opens (via MutationObserver).
+// This catches `openModal('log-modal')` regardless of caller.
+(function watchLogModal() {
+  function attach() {
+    const modal = document.getElementById('log-modal');
+    if (!modal) { setTimeout(attach, 300); return; }
+    const obs = new MutationObserver(function () {
+      if (!modal.classList.contains('hidden')) renderNow();
+    });
+    obs.observe(modal, { attributes: true, attributeFilter: ['class'] });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', attach);
+  } else {
+    attach();
+  }
+})();
+
+/* --------------------------- SELF-TEST --------------------------- */
+logger.info('Logger v2.0 initialized — ' + entries.length + ' entries restored');
+
+export default logger;
