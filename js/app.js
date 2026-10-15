@@ -1,10 +1,16 @@
 /**
  * ============================================================================
- * STEERADAR FRONTEND CONTROLLER (v14.0)
+ * STEERADAR FRONTEND CONTROLLER (v14.1)
  * ============================================================================
- * Compatible with index.html v14, map.js (patched), api.js v11, features.js
- * Features: theme toggle, map themes, road routing, bottom sheet (via
- *           features.js), avatar chat, debounced presence, uploads
+ * Compatible with index.html v14.1, map.js, api.js, features.js, logger.js
+ * Changelog v14.1:
+ *   + Full Hive post renderer (title, tags, media, actions)
+ *   + Comments: openCommentModal, submitComment, loadPostComments, deleteComment
+ *   + Post detail modal: openPostDetail (Instagram-style)
+ *   + Share sheet: openShareModal + shareTo(whatsapp|twitter|...)
+ *   + Deep-link hash router: #hive/<postId>
+ *   + Hive photo preview reuses previewImage()
+ *   All v14.0 behavior preserved.
  * ============================================================================
  */
 
@@ -22,7 +28,6 @@ const PRESENCE_MIN_GAP = 15000;
 const CHAT_POLL_INTERVAL = 5000;
 const TOAST_DURATION = CONFIG.TOAST_DURATION_MS || 2400;
 
-// Fallback avatar for chat rendering
 const DEFAULT_AGENT_AVATAR = 'https://i.pravatar.cc/150?img=12';
 const DEFAULT_USER_AVATAR = 'https://i.pravatar.cc/150?img=11';
 
@@ -50,7 +55,10 @@ const state = {
     activeMapTheme: 'bright',
     intervals: { poll: null, presence: null, chat: null },
     isLoading: { lanes: false, hive: false, chat: false },
-    isOnline: navigator.onLine
+    isOnline: navigator.onLine,
+    // NEW
+    currentPostId: null,
+    currentSharePostId: null
 };
 
 let _lastPresenceSent = 0;
@@ -76,7 +84,7 @@ const DOM = {
     chatMessages: document.getElementById('chat-messages-container'),
     chatInput: document.getElementById('chat-input'),
     chatTitle: document.getElementById('chat-room-title'),
-    chatHeaderAvatar: document.getElementById('chat-header-avatar'), // ⭐ NEW
+    chatHeaderAvatar: document.getElementById('chat-header-avatar'),
     adminApplicationList: document.getElementById('admin-application-list'),
     logoTrigger: document.getElementById('logo-trigger'),
     themeToggle: document.getElementById('toggle-theme'),
@@ -89,7 +97,7 @@ const DOM = {
 document.addEventListener('DOMContentLoaded', async () => {
     logger.init();
 
-    console.log('%c SteerRadar v14.0 booted ',
+    console.log('%c SteerRadar v14.1 booted ',
         'background:#00d4a0;color:#000;font-weight:800;padding:4px 10px;border-radius:4px;');
 
     applyTheme();
@@ -105,6 +113,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     initMap();
 
     await checkSession();
+
+    // NEW: deep-link hash router
+    handleHashRoute();
+    window.addEventListener('hashchange', handleHashRoute);
 });
 
 // ============================================================================
@@ -173,6 +185,7 @@ function setupEventListeners() {
     document.getElementById('toggle-ghost-mode')?.addEventListener('change', handleGhostModeToggle);
     DOM.chatInput?.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
     DOM.ctrlTrip?.addEventListener('click', toggleTrip);
+
     document.getElementById('lane-photo')?.addEventListener('change', (e) => previewImage(e, 'lane-photo-preview'));
     document.getElementById('hive-photo')?.addEventListener('change', (e) => previewImage(e, 'hive-photo-preview'));
     document.getElementById('edit-avatar')?.addEventListener('change', (e) => previewImage(e, 'edit-avatar-preview'));
@@ -182,6 +195,9 @@ function setupEventListeners() {
             if (e.target === overlay) overlay.classList.add('hidden');
         });
     });
+
+    // NEW: comment submit button
+    document.getElementById('comment-submit-btn')?.addEventListener('click', submitComment);
 }
 
 // ============================================================================
@@ -510,7 +526,7 @@ function refreshAll() {
 }
 
 // ============================================================================
-// 12. LANES
+// 12. LANES (unchanged)
 // ============================================================================
 async function loadLanes(silent) {
     if (!state.isOnline || state.isLoading.lanes) return;
@@ -561,7 +577,6 @@ function createLaneCardHTML(lane) {
         if (km > 0) distanceHTML = '<span class="distance-pill mt-2"><i class="fas fa-route"></i> ' + mapModule.formatDistance(km) + '</span>';
     }
 
-    // ⭐ CHANGED: pass avatar to openChat
     const laneAvatar = lane.photo || DEFAULT_AGENT_AVATAR;
     const ownerName = escapeHTML(lane.ownerName || 'Driver');
 
@@ -595,16 +610,12 @@ function createLaneCardHTML(lane) {
         </div>`;
 }
 
-// ⭐ CHANGED: Now calls showLaneDetails (from features.js)
 window.showLaneBottomSheetById = function (laneId) {
     const lane = state.allLanes.find(l => l.id === laneId);
     if (!lane) return showToast('Lane not found', 'error');
-
-    // Prefer features.js (new bottom sheet with fare / negotiation)
     if (typeof window.showLaneDetails === 'function') {
         window.showLaneDetails(lane);
     } else if (typeof window.showLaneBottomSheet === 'function') {
-        // Fallback to old map.js bottom sheet if features.js not loaded
         window.showLaneBottomSheet(lane);
     } else {
         showLaneOnMap(laneId);
@@ -616,7 +627,6 @@ window.requestSeat = function (laneId) {
     showToast('Seat request sent! The driver will respond in chat.', 'success');
 };
 
-// ⭐ CHANGED: Now calls showLaneDetails
 window.showLaneOnMap = function (laneId) {
     const lane = state.allLanes.find(l => l.id === laneId);
     if (!lane) return;
@@ -641,7 +651,7 @@ window.navigateToLane = function (laneId) {
 };
 
 // ============================================================================
-// 13. HIVE
+// 13. HIVE — v14.1 FULL RENDERER
 // ============================================================================
 async function loadHive(silent) {
     if (!state.isOnline || state.isLoading.hive) return;
@@ -675,38 +685,80 @@ function getHiveContainer() {
     return container;
 }
 
-function createHivePostHTML(post) {
-    let mediaHTML = '';
+/**
+ * Build media block from a post — supports:
+ *   - uploaded image (post.photo)
+ *   - YouTube embed (post.mediaType === 'youtube')
+ *   - Instagram embed (post.mediaType === 'instagram')
+ */
+function buildPostMediaHTML(post) {
     if (post.photo) {
-        mediaHTML = '<div class="post-image"><img src="' + post.photo + '" alt="Post" onerror="this.onerror=null; this.style.display=\'none\';"></div>';
-    } else if (post.mediaType === 'youtube' && post.mediaUrl) {
-        const vid = extractYouTubeId(post.mediaUrl);
-        if (vid) mediaHTML = '<div style="margin-bottom:10px; border-radius:12px; overflow:hidden;"><iframe width="100%" height="190" src="https://www.youtube.com/embed/' + vid + '" frameborder="0" allowfullscreen loading="lazy"></iframe></div>';
-    } else if (post.mediaType === 'instagram' && post.mediaUrl) {
-        mediaHTML = '<div style="margin-bottom:10px;"><blockquote class="instagram-media" data-instgrm-permalink="' + post.mediaUrl + '" data-instgrm-version="14" style="width:100%; margin:0;"></blockquote></div>';
+        return '<div class="post-image"><img src="' + post.photo + '" alt="Post" loading="lazy" onerror="this.onerror=null; this.style.display=\'none\';"></div>';
     }
-    const avatar = 'https://i.pravatar.cc/150?u=' + (post.owner || post.userPhone || Math.random());
+    if (!post.mediaUrl) return '';
+    if (post.mediaType === 'youtube') {
+        const vid = extractYouTubeId(post.mediaUrl);
+        if (vid) return '<div style="margin-bottom:10px; border-radius:12px; overflow:hidden;"><iframe width="100%" height="190" src="https://www.youtube.com/embed/' + vid + '" frameborder="0" allowfullscreen loading="lazy"></iframe></div>';
+    }
+    if (post.mediaType === 'instagram') {
+        return '<div style="margin-bottom:10px;"><blockquote class="instagram-media" data-instgrm-permalink="' + post.mediaUrl + '" data-instgrm-version="14" style="width:100%; margin:0;"></blockquote></div>';
+    }
+    if (post.mediaType === 'video') {
+        return '<div class="post-image"><video controls playsinline src="' + post.mediaUrl + '"></video></div>';
+    }
+    // Generic link
+    return '<a href="' + escapeHTML(post.mediaUrl) + '" target="_blank" rel="noopener" class="text-sub text-xs" style="display:block; margin-bottom:10px;"><i class="fas fa-link"></i> ' + escapeHTML(post.mediaUrl) + '</a>';
+}
+
+function buildPostTagsHTML(post) {
+    if (!post.tags) return '';
+    const tags = String(post.tags).split('|').filter(Boolean);
+    if (!tags.length) return '';
+    return '<div class="post-tags">' + tags.map(t => '<span class="post-tag" onclick="filterHiveByTag(\'' + escapeHTML(t) + '\')">#' + escapeHTML(t) + '</span>').join('') + '</div>';
+}
+
+function createHivePostHTML(post) {
+    const avatar = 'https://i.pravatar.cc/150?u=' + encodeURIComponent(post.vehicle || post.ownerName || post.id);
+    const mediaHTML = buildPostMediaHTML(post);
+    const tagsHTML = buildPostTagsHTML(post);
+    const titleHTML = post.title ? '<div class="post-title">' + escapeHTML(post.title) + '</div>' : '';
+    const commentsCount = post.comments || post.commentsCount || 0;
+    const likesCount = post.likes || 0;
 
     return `
-        <div class="post-card">
+        <div class="post-card" data-post-id="${post.id}">
             <div class="post-header">
-                <img src="${avatar}" class="driver-avatar avatar-lg" onerror="this.src='https://i.pravatar.cc/150?img=5'">
+                <img src="${avatar}" class="driver-avatar avatar-lg" onerror="this.src='${DEFAULT_AGENT_AVATAR}'" onclick="openPostDetail('${post.id}')">
                 <div>
-                    <div class="post-user">${escapeHTML(post.ownerName || 'User')} <i class="fas fa-check-circle verified-badge"></i></div>
+                    <div class="post-user">${escapeHTML(post.ownerName || post.name || 'User')} <i class="fas fa-check-circle verified-badge"></i></div>
                     <div class="post-time">${timeAgo(post.createdAt)}</div>
                 </div>
             </div>
-            <div class="post-content">${escapeHTML(post.text || '')}</div>
+            ${titleHTML}
+            <div class="post-content" onclick="openPostDetail('${post.id}')">${escapeHTML(post.text || '')}</div>
             ${mediaHTML}
+            ${tagsHTML}
             <div class="post-actions">
-                <div class="post-action" onclick="toggleLike('${post.id}', ${post.likes || 0})">
-                    <i class="far fa-heart"></i> <span id="likes-${post.id}">${post.likes || 0}</span>
+                <div class="post-action" data-action="like" data-post="${post.id}" onclick="toggleLike('${post.id}', ${likesCount})">
+                    <i class="far fa-heart"></i> <span id="likes-${post.id}">${likesCount}</span>
                 </div>
-                <div class="post-action"><i class="far fa-comment"></i> Comment</div>
-                <div class="post-action"><i class="fas fa-share"></i> Share</div>
+                <div class="post-action" data-action="comment" onclick="openCommentModal('${post.id}')">
+                    <i class="far fa-comment"></i> <span>${commentsCount}</span>
+                </div>
+                <div class="post-action" data-action="share" onclick="openShareModal('${post.id}')">
+                    <i class="far fa-paper-plane"></i> Share
+                </div>
+                <div class="post-action" data-action="detail" onclick="openPostDetail('${post.id}')">
+                    <i class="fas fa-expand"></i> Open
+                </div>
             </div>
         </div>`;
 }
+
+window.filterHiveByTag = function (tag) {
+    showToast('Filtering by #' + tag, 'info');
+    // Optional: implement actual filter. For now just a toast.
+};
 
 window.toggleLike = async function (postId, currentLikes) {
     if (!state.user) return showToast('Sign in to like posts', 'error');
@@ -715,23 +767,254 @@ window.toggleLike = async function (postId, currentLikes) {
     if (!el) return;
     const wasLiked = el.dataset.liked === 'true';
     const delta = wasLiked ? -1 : 1;
-    el.textContent = Math.max(0, currentLikes + delta);
+    el.textContent = Math.max(0, Number(currentLikes) + delta);
     el.dataset.liked = (!wasLiked).toString();
-    el.parentElement.style.color = wasLiked ? '' : 'var(--primary)';
+    const actionEl = el.parentElement;
+    actionEl.style.color = wasLiked ? '' : 'var(--primary)';
+    actionEl.classList.toggle('liked', !wasLiked);
     await api.like('hive', postId, delta);
 };
 
 // ============================================================================
+// 13b. HIVE COMMENTS — v14.1
+// ============================================================================
+window.openCommentModal = function (postId) {
+    if (!state.user) return showToast('Sign in to comment', 'error');
+    state.currentPostId = postId;
+    document.getElementById('comment-post-id').value = postId;
+    document.getElementById('comment-text').value = '';
+    window.openModal('comment-modal');
+    setTimeout(() => document.getElementById('comment-text')?.focus(), 250);
+};
+
+window.submitComment = async function () {
+    const postId = document.getElementById('comment-post-id').value;
+    const text = document.getElementById('comment-text').value.trim();
+    if (!postId) return showToast('No post selected', 'error');
+    if (!text) return showToast('Comment cannot be empty', 'warning');
+
+    const btn = document.getElementById('comment-submit-btn');
+    setButtonLoading(btn, 'Posting...');
+    try {
+        const res = await api.addHiveComment(postId, text);
+        if (res && res.ok !== false) {
+            showToast('Comment posted!', 'success');
+            window.closeModal('comment-modal');
+            document.getElementById('comment-text').value = '';
+
+            // Update inline count on feed card
+            const card = document.querySelector('.post-card[data-post-id="' + postId + '"]');
+            if (card) {
+                const cnt = card.querySelector('[data-action="comment"] span');
+                if (cnt) cnt.textContent = res.commentsCount != null ? res.commentsCount : (parseInt(cnt.textContent || '0') + 1);
+            }
+
+            // If detail modal is open for this post, refresh comments
+            const detailModal = document.getElementById('post-detail-modal');
+            if (detailModal && !detailModal.classList.contains('hidden') && state.currentPostId === postId) {
+                loadPostComments(postId);
+            }
+        } else {
+            throw new Error((res && res.error) || api.lastError || 'Failed to post');
+        }
+    } catch (err) {
+        showToast(err.message || 'Failed to post comment', 'error');
+    } finally {
+        resetButton(btn, '<i class="fas fa-paper-plane"></i> Post Comment');
+    }
+};
+
+// ============================================================================
+// 13c. POST DETAIL MODAL — v14.1
+// ============================================================================
+window.openPostDetail = async function (postId) {
+    state.currentPostId = postId;
+    const post = state.hive.find(p => p.id === postId);
+    const detail = document.getElementById('post-detail-content');
+    const commentsBox = document.getElementById('post-detail-comments');
+    if (!detail) return;
+
+    if (!post) {
+        detail.innerHTML = '<div class="empty-state">Post not found</div>';
+        commentsBox.innerHTML = '';
+        window.openModal('post-detail-modal');
+        return;
+    }
+
+    const avatar = 'https://i.pravatar.cc/150?u=' + encodeURIComponent(post.vehicle || post.ownerName || post.id);
+    const mediaHTML = buildPostMediaHTML(post);
+    const commentsCount = post.comments || post.commentsCount || 0;
+    const likesCount = post.likes || 0;
+
+    detail.innerHTML = `
+        <div class="pd-author">
+            <img src="${avatar}" onerror="this.src='${DEFAULT_AGENT_AVATAR}'">
+            <div>
+                <div class="pd-name">${escapeHTML(post.ownerName || post.name || 'User')}</div>
+                <div class="pd-time">${timeAgo(post.createdAt)}</div>
+            </div>
+        </div>
+        ${post.title ? '<div class="pd-title">' + escapeHTML(post.title) + '</div>' : ''}
+        ${post.text ? '<div class="pd-text">' + escapeHTML(post.text) + '</div>' : ''}
+        ${mediaHTML ? '<div class="pd-media">' + mediaHTML.replace(/^<div class="post-image">/, '').replace(/<\/div>$/, '') + '</div>' : ''}
+        ${buildPostTagsHTML(post)}
+        <div class="pd-actions">
+            <div class="post-action ${post._liked ? 'liked' : ''}" onclick="toggleLike('${post.id}', ${likesCount})">
+                <i class="far fa-heart"></i> <span id="likes-${post.id}-detail">${likesCount}</span>
+            </div>
+            <div class="post-action" onclick="openCommentModal('${post.id}')">
+                <i class="far fa-comment"></i> ${commentsCount}
+            </div>
+            <div class="post-action" onclick="openShareModal('${post.id}')">
+                <i class="far fa-paper-plane"></i> Share
+            </div>
+        </div>
+    `;
+
+    commentsBox.innerHTML = '<div class="text-center text-sub text-sm" style="padding:20px;"><div class="spinner"></div></div>';
+    window.openModal('post-detail-modal');
+    loadPostComments(postId);
+
+    // Update URL for deep link
+    try {
+        const base = location.href.split('#')[0];
+        history.replaceState(null, '', base + '#hive/' + encodeURIComponent(postId));
+    } catch (e) {}
+};
+
+async function loadPostComments(postId) {
+    const commentsBox = document.getElementById('post-detail-comments');
+    if (!commentsBox) return;
+    try {
+        const comments = await api.listHiveComments(postId, 100);
+        if (!comments || !comments.length) {
+            commentsBox.innerHTML = '<div class="pd-comments-empty">No comments yet. Be the first!</div>';
+            return;
+        }
+        commentsBox.innerHTML = comments.map(c => {
+            const avatar = 'https://i.pravatar.cc/150?u=' + encodeURIComponent(c.name || c.id);
+            const deleteBtn = c.mine
+                ? '<button class="pd-comment-delete" onclick="deleteComment(\'' + c.id + '\', \'' + postId + '\')" title="Delete"><i class="fas fa-trash"></i></button>'
+                : '';
+            return `
+                <div class="pd-comment">
+                    <img src="${avatar}" onerror="this.src='${DEFAULT_USER_AVATAR}'">
+                    <div class="pd-comment-body">
+                        <div class="pd-comment-name">${escapeHTML(c.name || 'User')}</div>
+                        <div class="pd-comment-text">${escapeHTML(c.text || '')}</div>
+                        <div class="pd-comment-time">${timeAgo(c.createdAt)}</div>
+                    </div>
+                    ${deleteBtn}
+                </div>
+            `;
+        }).join('');
+    } catch (err) {
+        commentsBox.innerHTML = '<div class="pd-comments-empty">Could not load comments.</div>';
+    }
+}
+
+window.deleteComment = async function (commentId, postId) {
+    if (!confirm('Delete this comment?')) return;
+    try {
+        const res = await api.deleteHiveComment(commentId);
+        if (res && res.ok !== false) {
+            showToast('Comment deleted', 'success');
+            loadPostComments(postId);
+            // Also decrement count in feed
+            const card = document.querySelector('.post-card[data-post-id="' + postId + '"]');
+            if (card) {
+                const cnt = card.querySelector('[data-action="comment"] span');
+                if (cnt) cnt.textContent = Math.max(0, parseInt(cnt.textContent || '0') - 1);
+            }
+        }
+    } catch (err) {
+        showToast('Delete failed', 'error');
+    }
+};
+
+// ============================================================================
+// 13d. SHARE SHEET — v14.1
+// ============================================================================
+window.openShareModal = function (postId) {
+    state.currentSharePostId = postId;
+    const url = location.origin + location.pathname + '#hive/' + encodeURIComponent(postId);
+    document.getElementById('share-post-id').value = postId;
+    document.getElementById('share-post-url').value = url;
+    document.getElementById('share-url-display').value = url;
+    window.openModal('share-modal');
+};
+
+window.shareTo = async function (platform) {
+    const postId = document.getElementById('share-post-id').value;
+    const url = document.getElementById('share-post-url').value;
+    const post = state.hive.find(p => p.id === postId);
+    const text = post ? ((post.title || post.text || 'Check this out').slice(0, 100)) : 'Check this out on SteerRadar';
+    const enc = encodeURIComponent;
+
+    const map = {
+        whatsapp: `https://wa.me/?text=${enc(text + ' ' + url)}`,
+        twitter:  `https://twitter.com/intent/tweet?text=${enc(text)}&url=${enc(url)}`,
+        telegram: `https://t.me/share/url?url=${enc(url)}&text=${enc(text)}`,
+        facebook: `https://www.facebook.com/sharer/sharer.php?u=${enc(url)}`,
+        linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${enc(url)}`
+    };
+
+    if (platform === 'copy') {
+        try {
+            await navigator.clipboard.writeText(url);
+            showToast('Link copied!', 'success');
+        } catch (e) {
+            // Fallback
+            const ta = document.createElement('textarea');
+            ta.value = url;
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); showToast('Link copied!', 'success'); } catch (err) { prompt('Copy link:', url); }
+            ta.remove();
+        }
+        return;
+    }
+    if (platform === 'instagram') {
+        try { await navigator.clipboard.writeText(url); } catch (e) {}
+        showToast('Link copied — paste it in Instagram', 'success');
+        return;
+    }
+    if (platform === 'native') {
+        if (navigator.share) {
+            try { await navigator.share({ title: 'SteerRadar', text: text, url: url }); } catch (e) {}
+        } else {
+            window.shareTo('copy');
+        }
+        return;
+    }
+    if (map[platform]) window.open(map[platform], '_blank', 'noopener');
+};
+
+// ============================================================================
+// 13e. HASH ROUTER — v14.1
+// ============================================================================
+function handleHashRoute() {
+    const hash = location.hash || '';
+    const m = /^#hive\/(.+)$/.exec(hash);
+    if (m) {
+        const postId = decodeURIComponent(m[1]);
+        if (state.activeTab !== 'hive') window.switchTab('hive');
+        // Wait for hive list to render, then open detail
+        setTimeout(() => {
+            if (!state.hive.length) return;
+            window.openPostDetail(postId);
+        }, 400);
+    }
+}
+
+// ============================================================================
 // 14. CHAT (avatar-based rendering)
 // ============================================================================
-
-// ⭐ CHANGED: accepts 3rd param (agent avatar) and sets header avatar
 window.openChat = async function (roomId, name, agentAvatar) {
     state.currentRoom = roomId;
     DOM.chatTitle.textContent = name || 'Hive Chat';
     DOM.chatView.classList.remove('hidden');
 
-    // Store the agent avatar for this session so loadMessages can use it
     const avatarUrl = agentAvatar || DEFAULT_AGENT_AVATAR;
     DOM.chatView.dataset.agentAvatar = avatarUrl;
     if (DOM.chatHeaderAvatar) DOM.chatHeaderAvatar.src = avatarUrl;
@@ -747,7 +1030,6 @@ window.closeChat = function () {
     if (state.intervals.chat) { clearInterval(state.intervals.chat); state.intervals.chat = null; }
 };
 
-// ⭐ CHANGED: Renders avatar + bubble layout
 async function loadMessages(roomId, silent) {
     if (!silent) DOM.chatMessages.innerHTML = '<div class="text-center text-sub text-sm" style="padding:20px;"><div class="spinner"></div></div>';
     const messages = await api.getMessages(roomId);
@@ -780,7 +1062,6 @@ async function loadMessages(roomId, silent) {
     }
 }
 
-// ⭐ CHANGED: Renders user avatar + bubble
 window.sendMessage = async function () {
     const text = DOM.chatInput.value.trim();
     if (!text || !state.currentRoom) return;
@@ -852,7 +1133,6 @@ async function handleCreateLane(e) {
             if (upload && upload.url) photoUrl = upload.url;
         }
 
-        // ⭐ NEW: read departure time if present in the form
         const startTimeInput = document.getElementById('lane-start-time');
         const startTime = startTimeInput ? startTimeInput.value : '';
 
@@ -862,7 +1142,7 @@ async function handleCreateLane(e) {
             seats: document.getElementById('lane-seats').value,
             total: document.getElementById('lane-seats').value,
             vehicleType: document.getElementById('lane-vehicle-type').value,
-            startTime: startTime, // ⭐ NEW
+            startTime: startTime,
             photo: photoUrl,
             lat: state.userLocation && state.userLocation.lat || CONFIG.DEFAULT_CENTER && CONFIG.DEFAULT_CENTER.lat || 17.3850,
             lng: state.userLocation && state.userLocation.lng || CONFIG.DEFAULT_CENTER && CONFIG.DEFAULT_CENTER.lng || 78.4867
@@ -879,17 +1159,24 @@ async function handleCreateLane(e) {
 }
 
 // ============================================================================
-// 18. CREATE HIVE POST
+// 18. CREATE HIVE POST — v14.1 (title + tags + preview)
 // ============================================================================
 async function handleCreateHivePost(e) {
     e.preventDefault();
     const btn = e.target.querySelector('button[type="submit"]');
     setButtonLoading(btn, 'Posting...');
     try {
+        const titleEl = document.getElementById('hive-title');
+        const textEl = document.getElementById('hive-text');
+        const tagsEl = document.getElementById('hive-tags');
         const photoFile = document.getElementById('hive-photo').files[0];
         const embedUrl = document.getElementById('hive-embed-url').value.trim();
-        const text = document.getElementById('hive-text').value.trim();
-        if (!text && !photoFile && !embedUrl) throw new Error('Add some text or media');
+
+        const title = titleEl ? titleEl.value.trim() : '';
+        const text = textEl ? textEl.value.trim() : '';
+        const tagsRaw = tagsEl ? tagsEl.value.trim() : '';
+
+        if (!text && !title && !photoFile && !embedUrl) throw new Error('Add some text or media');
 
         let photoUrl = '', mediaType = '', mediaUrl = '';
         if (photoFile) {
@@ -904,8 +1191,22 @@ async function handleCreateHivePost(e) {
             else if (/instagram\.com/.test(embedUrl)) mediaType = 'instagram';
             else mediaType = 'link';
         }
+
+        // Tags: comma-separated → pipe-separated for backend
+        const tags = tagsRaw
+            .split(',')
+            .map(t => t.trim().replace(/^#/, ''))
+            .filter(Boolean)
+            .slice(0, 5)
+            .join('|');
+
         const payload = {
-            text: text, photo: photoUrl, mediaUrl: mediaUrl, mediaType: mediaType,
+            title: title,
+            text: text,
+            tags: tags,
+            photo: photoUrl,
+            mediaUrl: mediaUrl,
+            mediaType: mediaType,
             lat: state.userLocation && state.userLocation.lat || 17.3850,
             lng: state.userLocation && state.userLocation.lng || 78.4867
         };
@@ -914,6 +1215,8 @@ async function handleCreateHivePost(e) {
             showToast('Posted!', 'success');
             closeModal('create-hive-modal');
             e.target.reset();
+            const prev = document.getElementById('hive-photo-preview');
+            if (prev) prev.innerHTML = '';
             loadHive();
         } else throw new Error(api.lastError || 'Failed');
     } catch (err) { showToast(err.message, 'error'); }
@@ -921,7 +1224,7 @@ async function handleCreateHivePost(e) {
 }
 
 // ============================================================================
-// 19. EDIT PROFILE
+// 19. EDIT PROFILE (unchanged)
 // ============================================================================
 window.openEditProfile = function () {
     if (!state.user) return;
@@ -963,7 +1266,7 @@ async function handleEditProfile(e) {
 }
 
 // ============================================================================
-// 20. STEERAGENT APPLICATION
+// 20. STEERAGENT APPLICATION (unchanged)
 // ============================================================================
 async function handleSteerAgentApplication(e) {
     e.preventDefault();
@@ -1020,7 +1323,7 @@ async function handleSteerAgentApplication(e) {
 }
 
 // ============================================================================
-// 21. ADMIN
+// 21. ADMIN (unchanged)
 // ============================================================================
 window.loadAdminApplications = async function () {
     if (!state.user || !state.user.isAdmin) return;
@@ -1054,7 +1357,7 @@ window.handleAdminAction = async function (uid, approve) {
 };
 
 // ============================================================================
-// 22. MAP
+// 22. MAP (unchanged)
 // ============================================================================
 function initMap() {
     mapModule.init('map', handleMapClick, {
@@ -1062,7 +1365,6 @@ function initMap() {
             const myPhone = state.user && state.user.phone || '';
             const ids = [myPhone, data.phone].sort();
             const roomId = 'dm-' + ids[0] + '-' + ids[1];
-            // ⭐ CHANGED: pass avatar if available
             await openChat(roomId, data.name || 'SteerAgent', data.avatar || DEFAULT_AGENT_AVATAR);
             if (data.action === 'quick' && data.text) {
                 DOM.chatInput.value = data.text;
@@ -1149,7 +1451,7 @@ async function loadSavedPoints() {
 }
 
 // ============================================================================
-// 23. LIVE PRESENCE (debounced)
+// 23. LIVE PRESENCE (unchanged)
 // ============================================================================
 async function broadcastPresence() {
     if (!state.user || state.user.role !== 'agent' || state.user.ghostMode) return;
@@ -1189,7 +1491,7 @@ async function broadcastPresence() {
 }
 
 // ============================================================================
-// 24. ALERTS
+// 24. ALERTS (unchanged)
 // ============================================================================
 window.reportAlert = async function (type) {
     if (!state.user) return showToast('Sign in first', 'error');
@@ -1204,7 +1506,7 @@ window.reportAlert = async function (type) {
 };
 
 // ============================================================================
-// 25. GHOST MODE
+// 25. GHOST MODE (unchanged)
 // ============================================================================
 async function handleGhostModeToggle(e) {
     const isGhost = e.target.checked;
@@ -1225,7 +1527,7 @@ async function handleGhostModeToggle(e) {
 }
 
 // ============================================================================
-// 26. TRIPS
+// 26. TRIPS (unchanged)
 // ============================================================================
 window.toggleTrip = async function () {
     if (!state.user || state.user.role !== 'agent') return showToast('Only SteerAgents can start trips', 'warning');
@@ -1304,7 +1606,7 @@ window.loadTrips = async function () {
 };
 
 // ============================================================================
-// 27. IMAGE PREVIEW
+// 27. IMAGE PREVIEW (unchanged)
 // ============================================================================
 function previewImage(event, previewId) {
     const file = event.target.files && event.target.files[0];
@@ -1322,7 +1624,7 @@ function previewImage(event, previewId) {
 }
 
 // ============================================================================
-// 28. TOASTS
+// 28. TOASTS (unchanged)
 // ============================================================================
 function showToast(message, type) {
     type = type || 'info';
@@ -1345,7 +1647,7 @@ function showToast(message, type) {
 window.showToast = showToast;
 
 // ============================================================================
-// 29. UTILITIES
+// 29. UTILITIES (unchanged)
 // ============================================================================
 function compressImage(file, maxDim, quality) {
     maxDim = maxDim || 800;
@@ -1431,4 +1733,4 @@ window.toggleGhostMode = function () {
     if (checkbox) checkbox.click();
 };
 
-console.log('[app] All handlers initialized (v14.0)');
+console.log('[app] All handlers initialized (v14.1)');
