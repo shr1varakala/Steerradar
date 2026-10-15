@@ -1,13 +1,12 @@
 /**
  * ============================================================================
- * STEERADAR MAP MODULE (v13.0 — merged with map-ui.js)
+ * STEERADAR MAP MODULE (v13.1 — v14.1 compatible)
  * ============================================================================
- * Features:
- *  - Road routing via OSRM (keyless, road-following polyline + ETA)
- *  - Multi-theme map support (bright/dark/satellite/terrain)
- *  - Pulsing agent pins (tap → features.js showLaneDetails → bottom sheet)
- *  - Real vehicle markers from API (same pulsing pin style)
- *  - Alerts, trip polylines, pickup routes, saved pins, search
+ * v13.1 change:
+ *   - renderVehicles() now picks the pin icon from vehicleType
+ *     (bike/two-wheeler 🛵, auto 🛺, car 🚗, bus 🚌, walk 🚶)
+ *   - All other behavior identical to v13.0
+ * Compatible with: index.html v14.1, app.js v14.1, api.js, features.js
  * ============================================================================
  */
 
@@ -42,7 +41,6 @@ const MAP_THEMES = {
 };
 
 // ============ MOCK AGENTS (for demo/testing) ============
-// Real agents come from api.activeVehicles() → mapModule.renderVehicles()
 const MOCK_AGENTS = [
     {
         id: 'agent-1',
@@ -136,6 +134,17 @@ let onMessageAgent = null;
 // Agent (pulsing pin) state
 let agentMarkers = [];
 
+// v13.1: icon map for vehicle types
+const VEHICLE_ICONS = {
+    bike: '🛵',
+    'two-wheeler': '🛵',
+    auto: '🛺',
+    car: '🚗',
+    bus: '🚌',
+    walk: '🚶',
+    event: '🎉'
+};
+
 // ============ HELPERS ============
 function ensureMap() {
     if (!map) { console.warn('[map] Not ready'); return false; }
@@ -183,7 +192,6 @@ function escapeHTML(str) {
 
 /**
  * Build the pulsing pin HTML used for both agents and real vehicles.
- * Matches the .custom-map-pin styles in style.css
  */
 function buildPulsingPinHTML(agent) {
     const icon = agent.vehicleIcon || '🚗';
@@ -216,7 +224,6 @@ export const mapModule = {
 
         onMessageAgent = options.onMessageAgent || null;
 
-        // Load saved theme
         try { currentTheme = localStorage.getItem('steeradar-maptheme') || 'bright'; } catch (e) {}
 
         const lat = CONFIG.DEFAULT_CENTER?.lat || 17.3850;
@@ -244,7 +251,6 @@ export const mapModule = {
                 }
             });
 
-            // Hide search results when user drags
             map.on('dragstart', () => mapModule.hideSearchResults());
 
             setTimeout(() => map.invalidateSize(), 100);
@@ -276,10 +282,7 @@ export const mapModule = {
             tileLayer = null;
         }
 
-        const opts = {
-            attribution: theme.attr,
-            maxZoom: 19
-        };
+        const opts = { attribution: theme.attr, maxZoom: 19 };
         if (theme.subdomains) opts.subdomains = theme.subdomains;
 
         tileLayer = L.tileLayer(theme.url, opts);
@@ -351,11 +354,8 @@ export const mapModule = {
         }).addTo(map);
 
         navigationLine = L.polyline(route.coords, {
-            color: '#4F46E5',
-            weight: 6,
-            opacity: 0.95,
-            lineCap: 'round',
-            lineJoin: 'round'
+            color: '#4F46E5', weight: 6, opacity: 0.95,
+            lineCap: 'round', lineJoin: 'round'
         }).addTo(map);
 
         const originMarker = L.marker([fromLat, fromLng], {
@@ -662,13 +662,8 @@ export const mapModule = {
     },
 
     // ========================================================================
-    // AGENTS (Pulsing Pins — new, from map-ui.js)
+    // AGENTS (Pulsing Pins)
     // ========================================================================
-
-    /**
-     * Render agent markers with pulsing pin design.
-     * Tap → window.showLaneDetails(agent) → bottom sheet (features.js)
-     */
     renderAgents: (agents = MOCK_AGENTS) => {
         if (!ensureMap() || !Array.isArray(agents)) return;
         mapModule.clearAgents();
@@ -698,7 +693,6 @@ export const mapModule = {
                 }
             });
 
-            // Hover scale effect
             marker.on('mouseover', function() {
                 const el = this.getElement()?.querySelector('.custom-map-pin');
                 if (el) el.style.transform = 'scale(1.08)';
@@ -751,7 +745,7 @@ export const mapModule = {
     },
 
     // ========================================================================
-    // VEHICLE MARKERS (Real data from API — uses pulsing pins too)
+    // VEHICLE MARKERS (Real data from API — pulsing pins)
     // ========================================================================
     renderVehicles: (vehicles = [], myLocation = null) => {
         if (!ensureMap() || !Array.isArray(vehicles)) return;
@@ -763,6 +757,9 @@ export const mapModule = {
             if (!v.lat || !v.lng) return;
             const isMine = v.mine;
             const color = isMine ? '#00b88a' : '#4F46E5';
+
+            // ⭐ v13.1: pick icon from vehicleType
+            const vehicleIcon = VEHICLE_ICONS[v.vehicleType] || '🚗';
 
             // Build an agent-like object for the bottom sheet
             const agentData = {
@@ -780,7 +777,8 @@ export const mapModule = {
                 vehicleModel: v.vehicleModel || 'Vehicle',
                 vehicleColor: v.vehicleColor || '—',
                 licensePlate: v.vehicle || 'N/A',
-                vehicleIcon: '🚗'
+                vehicleType: v.vehicleType || 'car',
+                vehicleIcon: vehicleIcon
             };
 
             const iconHtml = buildPulsingPinHTML(agentData);
@@ -796,7 +794,6 @@ export const mapModule = {
                 riseOnHover: true
             }).addTo(map);
 
-            // Build the popup (keeps old "Message / Where?" behavior)
             let distanceHTML = '';
             if (myLocation && !isMine) {
                 const km = haversine(myLocation.lat, myLocation.lng, v.lat, v.lng);
@@ -818,7 +815,7 @@ export const mapModule = {
                             font-size:12px; border:2px solid #fff;">${(v.name || 'DR').substring(0,2).toUpperCase()}</div>
                         <div>
                             <div style="font-weight:700; color:#111; font-size:13px;">${name}</div>
-                            <div style="font-size:10px; color:#6b7280;">${vehicleNum ? '🚗 ' + vehicleNum : 'On the road'}</div>
+                            <div style="font-size:10px; color:#6b7280;">${vehicleNum ? vehicleIcon + ' ' + vehicleNum : 'On the road'}</div>
                         </div>
                     </div>
                     ${distanceHTML}
@@ -837,7 +834,6 @@ export const mapModule = {
 
             marker.bindPopup(popupHTML);
 
-            // ⭐ Primary action: tap pin → bottom sheet via features.js
             marker.on('click', (e) => {
                 L.DomEvent.stopPropagation(e);
                 if (typeof window.showLaneDetails === 'function') {
@@ -1120,10 +1116,7 @@ export const mapModule = {
         mapModule.clearAgents();
     },
 
-    // ========================================================================
-    // CONSTANTS (exposed for anyone who wants the demo data)
-    // ========================================================================
     MOCK_AGENTS: MOCK_AGENTS
 };
 
-console.log('[map] Module v13.0 loaded (merged with map-ui)');
+console.log('[map] Module v13.1 loaded (v14.1 compatible)');
