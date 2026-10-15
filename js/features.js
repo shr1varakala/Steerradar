@@ -1,8 +1,14 @@
 /**
  * ============================================================================
- * STEERADAR FEATURES (v14.0)
+ * STEERADAR FEATURES (v14.1)
  * ============================================================================
  * Loaded as a separate ES module, after app.js.
+ *
+ * Changelog vs v14.0:
+ *   + showLaneDetails now mirrors the selected agent into window.state.selectedAgent
+ *   + "View Full Profile" button calls viewAgentProfile() with no arg
+ *     (was passing window.state.selectedAgent || null, which broke when null)
+ *   Everything else preserved.
  *
  * Changelog vs v13:
  *   ✗ Removed window.openChat override (was clobbering app.js's real chat)
@@ -11,7 +17,6 @@
  *   + sendOffer()      — now sends the offer as a real message via app.js
  *   + viewAgentProfile — shows real uploaded photos when available
  *   + getLastAgent()   — named export for other modules
- *   Everything else preserved.
  * ============================================================================
  */
 
@@ -58,6 +63,9 @@ window.showLaneDetails = function (agent) {
   if (!agent) return;
   currentSelectedAgent = agent;
   lastOpenedAgent = agent;
+
+  // ⭐ v14.1: expose to window.state so external callers can see it
+  if (window.state) window.state.selectedAgent = agent;
 
   const baseFare = Number(agent.baseFare) || 10;
   const distance = Number(agent.distance) || 5;
@@ -114,7 +122,7 @@ window.showLaneDetails = function (agent) {
       </button>
     </div>
 
-    <button onclick="viewAgentProfile(window.state && window.state.selectedAgent || null)" class="btn btn-secondary w-full mt-2" style="padding: 10px;">
+    <button onclick="viewAgentProfile()" class="btn btn-secondary w-full mt-2" style="padding: 10px;">
       <i class="fas fa-user-circle"></i> View Full Profile
     </button>
   `;
@@ -227,7 +235,13 @@ window.openChatFromAgentProfile = function () {
    ========================================================================== */
 window.viewAgentProfile = function (agent) {
   const a = agent || currentSelectedAgent || lastOpenedAgent;
-  if (!a) return;
+  if (!a) {
+    logger.warn('viewAgentProfile called with no agent');
+    if (typeof window.showToast === 'function') {
+      window.showToast('No agent selected', 'warning');
+    }
+    return;
+  }
 
   currentSelectedAgent = a;
   lastOpenedAgent = a;
@@ -310,5 +324,5 @@ export function getSelectedAgent() { return currentSelectedAgent; }
 /* ==========================================================================
    LOG
    ========================================================================== */
-logger.info('features.js v14.0 loaded — Lanes, Negotiation, Agent Profile wired.');
-console.log('[features] v14.0 loaded');
+logger.info('features.js v14.1 loaded — Lanes, Negotiation, Agent Profile wired.');
+console.log('[features] v14.1 loaded');
