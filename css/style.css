@@ -1,5 +1,5 @@
 /* ============================================================================
-   STEERADAR STYLESHEET (v13.0)
+   STEERADAR STYLESHEET (v14.1)
    ============================================================================
    1. CSS Variables (Light + Dark Themes)
    2. Reset & Base
@@ -20,6 +20,8 @@
    17. Trips
    18. Log Viewer
    19. Responsive
+   20. v14.0 Extras (chat avatars, agent profile, negotiation)
+   21. v14.1 NEW — Post detail, comments, share, hive photo preview
    ============================================================================ */
 
 /* ============================ 1. CSS VARIABLES ============================ */
@@ -1717,21 +1719,13 @@ a:focus-visible {
 }
 
 /* ============================================================================
-   NEW FEATURES ADDITIONS (v14.0)
-   ----------------------------------------------------------------------------
-   Append this to the very bottom of css/style.css
-   Covers: Chat Avatars, Agent Profile Gallery, Negotiation Stepper,
-           Flex utilities for new modals
+   v14.0 EXTRAS
    ============================================================================ */
 
-/* --- 1. FLEX UTILITY (used in new modals/content) --- */
+/* --- 1. FLEX UTILITY --- */
 .flex-1 { flex: 1; }
 
 /* --- 2. CHAT MESSAGE REDESIGN (Avatar + Bubble) --- */
-/* 
-   IMPORTANT: Overrides the base .chat-message style for the new 
-   avatar-based layout. Specificity uses #hive-chat-view to win.
-*/
 #hive-chat-view .chat-message {
     max-width: 85%;
     padding: 0;
@@ -1797,7 +1791,6 @@ a:focus-visible {
 
 /* --- 4. AGENT PROFILE MODAL --- */
 #agent-profile-modal .modal-content {
-    /* Slightly taller to fit gallery + vehicle details */
     max-height: 92vh;
     overflow-y: auto;
 }
@@ -1817,7 +1810,7 @@ a:focus-visible {
     margin-right: 2px;
 }
 
-/* --- 5. AGENT IMAGES GALLERY (Horizontal Scroll) --- */
+/* --- 5. AGENT IMAGES GALLERY --- */
 #agent-images-gallery {
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -1835,7 +1828,7 @@ a:focus-visible {
     box-shadow: var(--shadow-md);
 }
 
-/* --- 6. NEGOTIATION STEPPER (- digit +) --- */
+/* --- 6. NEGOTIATION STEPPER --- */
 #negotiation-modal .btn-circle {
     width: 52px;
     height: 52px;
@@ -1864,14 +1857,12 @@ a:focus-visible {
     color: var(--text-main);
 }
 
-/* Line-through standard fare */
 #neg-standard-fare {
     text-decoration: line-through;
     text-decoration-thickness: 2px;
     text-decoration-color: var(--text-dashed, var(--text-muted));
 }
 
-/* Offer display emphasis */
 #neg-offer-display {
     font-variant-numeric: tabular-nums;
     letter-spacing: -1px;
@@ -1882,9 +1873,8 @@ a:focus-visible {
     animation: slideUpSheet 0.32s cubic-bezier(0.34, 1.2, 0.64, 1);
 }
 
-/* --- 8. BOTTOM SHEET: NEW CONTENT ADJUSTMENTS --- */
+/* --- 8. BOTTOM SHEET CONTENT ADJUSTMENTS --- */
 #bottom-sheet-content .post-card {
-    /* Tighter cards inside bottom sheet */
     padding: 12px;
     margin-bottom: 12px;
 }
@@ -1893,12 +1883,11 @@ a:focus-visible {
     border-width: 2px;
 }
 
-/* --- 9. TRIP BANNER BUTTON OVERRIDE (for new badge tags) --- */
 #bottom-sheet-content .tag {
     font-size: 9px;
 }
 
-/* --- 10. NO-SCROLLBAR UTILITY (used in agent gallery) --- */
+/* --- 9. NO-SCROLLBAR UTILITY --- */
 .no-scrollbar {
     scrollbar-width: none;
     -ms-overflow-style: none;
@@ -1907,13 +1896,13 @@ a:focus-visible {
     display: none;
 }
 
-/* --- 11. GRID-2-COL WIDTH FIX (used in Agent Profile vehicle details) --- */
+/* --- 10. GRID-2-COL WIDTH FIX --- */
 .grid-2-col > div {
     min-width: 0;
     word-wrap: break-word;
 }
 
-/* --- 12. CUSTOM MAP PIN (Safety Net – in case section above was missed) --- */
+/* --- 11. CUSTOM MAP PIN SAFETY NET --- */
 .custom-div-icon {
     background: transparent !important;
     border: none !important;
@@ -1958,7 +1947,7 @@ a:focus-visible {
     background: var(--bg-elevated);
 }
 
-/* --- 13. RESPONSIVE TIGHTENING FOR NEW MODALS --- */
+/* --- 12. RESPONSIVE TIGHTENING FOR NEGOTIATION --- */
 @media (max-width: 380px) {
     #negotiation-modal .btn-circle {
         width: 46px;
@@ -1969,4 +1958,352 @@ a:focus-visible {
     #neg-offer-display {
         font-size: 26px !important;
     }
+}
+
+/* ============================================================================
+   21. v14.1 — POST DETAIL, COMMENTS, SHARE, HIVE POST ENHANCEMENTS
+   ============================================================================ */
+
+/* --- 1. HIVE PHOTO PREVIEW (inside create-hive-modal) --- */
+#hive-photo-preview img {
+    display: block;
+    width: 100%;
+    max-height: 240px;
+    object-fit: cover;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-dark);
+    box-shadow: var(--shadow-sm);
+}
+
+/* --- 2. HIVE POST CARD ENHANCEMENTS --- */
+.post-card .post-media {
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 10px;
+    background: var(--bg-dark);
+}
+.post-card .post-media img,
+.post-card .post-media video {
+    display: block;
+    width: 100%;
+    max-height: 420px;
+    object-fit: cover;
+    border-radius: 12px;
+}
+
+.post-card .post-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-main);
+    margin-bottom: 4px;
+    letter-spacing: -0.2px;
+}
+
+.post-card .post-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.post-tag {
+    font-size: 11px;
+    color: var(--primary);
+    background: var(--primary-subtle);
+    padding: 3px 9px;
+    border-radius: 20px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.15s ease;
+}
+.post-tag:hover { background: rgba(0, 184, 138, 0.18); }
+
+/* Double-tap like heart (pop-in) */
+.post-media .like-heart {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    color: #fff;
+    font-size: 90px;
+    opacity: 0;
+    pointer-events: none;
+    text-shadow: 0 4px 18px rgba(0,0,0,0.4);
+    transition: transform 0.25s ease, opacity 0.25s ease;
+}
+.post-media.liked .like-heart {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+}
+
+/* --- 3. POST ACTIONS — engagement bar --- */
+.post-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 10px;
+    gap: 6px;
+}
+.post-action {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: var(--text-sub);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 8px 6px;
+    border-radius: 10px;
+    transition: 0.15s ease;
+    user-select: none;
+}
+.post-action:hover { color: var(--primary); background: var(--primary-subtle); }
+.post-action:active { transform: scale(0.96); }
+.post-action i { font-size: 15px; }
+
+.post-action.liked { color: #e11d48; }
+.post-action.liked i { animation: heartPop 0.35s cubic-bezier(0.68, -0.55, 0.265, 1.55); }
+
+@keyframes heartPop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.35); }
+    100% { transform: scale(1); }
+}
+
+/* --- 4. POST DETAIL MODAL --- */
+#post-detail-modal .modal-content {
+    max-height: 92vh;
+    overflow-y: auto;
+    padding-bottom: 12px;
+}
+
+#post-detail-content .pd-author {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+#post-detail-content .pd-author img {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--primary);
+}
+#post-detail-content .pd-author .pd-name {
+    font-size: 14px; font-weight: 700; color: var(--text-main);
+    line-height: 1.2;
+}
+#post-detail-content .pd-author .pd-time {
+    font-size: 11px; color: var(--text-sub);
+}
+
+#post-detail-content .pd-media {
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--bg-dark);
+    margin-bottom: 12px;
+}
+#post-detail-content .pd-media img,
+#post-detail-content .pd-media video {
+    display: block;
+    width: 100%;
+    max-height: 460px;
+    object-fit: cover;
+}
+
+#post-detail-content .pd-title {
+    font-size: 17px;
+    font-weight: 800;
+    color: var(--text-main);
+    margin-bottom: 6px;
+    letter-spacing: -0.3px;
+}
+#post-detail-content .pd-text {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-main);
+    margin-bottom: 10px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+#post-detail-content .pd-actions {
+    display: flex;
+    gap: 6px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-subtle);
+    margin-top: 4px;
+}
+
+/* --- 5. COMMENTS LIST (used in post-detail-modal) --- */
+.pd-comment {
+    display: flex;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-subtle);
+    animation: commentIn 0.25s ease;
+}
+.pd-comment:last-child { border-bottom: none; }
+
+@keyframes commentIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.pd-comment img {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    border: 2px solid var(--bg-card);
+    background: var(--bg-card);
+}
+.pd-comment .pd-comment-body { flex: 1; min-width: 0; }
+.pd-comment .pd-comment-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-main);
+    margin-bottom: 2px;
+}
+.pd-comment .pd-comment-text {
+    font-size: 13px;
+    color: var(--text-main);
+    line-height: 1.45;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+}
+.pd-comment .pd-comment-time {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 3px;
+}
+.pd-comment .pd-comment-delete {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 4px;
+    flex-shrink: 0;
+    transition: color 0.15s ease;
+}
+.pd-comment .pd-comment-delete:hover { color: var(--danger); }
+
+.pd-comments-empty {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-sub);
+    padding: 20px;
+    font-style: italic;
+}
+
+/* --- 6. SHARE MODAL --- */
+#share-modal .modal-content {
+    padding-bottom: 22px;
+}
+
+#share-modal .form-input[readonly] {
+    background: var(--bg-card);
+    color: var(--text-sub);
+    cursor: text;
+    font-size: 12px;
+    font-family: 'SF Mono', 'Courier New', Consolas, monospace;
+}
+
+#share-modal button[onclick^="shareTo"] {
+    transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+#share-modal button[onclick^="shareTo"]:hover {
+    transform: translateY(-2px);
+    border-color: var(--primary);
+    background: var(--primary-subtle);
+}
+#share-modal button[onclick^="shareTo"]:active {
+    transform: scale(0.96);
+}
+
+/* --- 7. COMMENT MODAL --- */
+#comment-modal textarea.form-input {
+    min-height: 90px;
+    resize: vertical;
+    line-height: 1.5;
+}
+
+#comment-submit-btn {
+    position: relative;
+}
+#comment-submit-btn.loading {
+    pointer-events: none;
+    opacity: 0.75;
+}
+#comment-submit-btn.loading::after {
+    content: '';
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255,255,255,0.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    margin-left: 8px;
+    animation: spin 0.7s linear infinite;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+/* --- 8. SKELETON FOR POSTS (while listHive loads) --- */
+.post-skeleton {
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 14px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border-subtle);
+}
+.post-skeleton .sk-line {
+    height: 12px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-card-hover) 50%, var(--bg-card) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    margin-bottom: 8px;
+}
+.post-skeleton .sk-line.w-40 { width: 40%; }
+.post-skeleton .sk-line.w-70 { width: 70%; }
+.post-skeleton .sk-img {
+    height: 180px;
+    border-radius: 12px;
+    background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-card-hover) 50%, var(--bg-card) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    margin: 10px 0;
+}
+
+/* --- 9. TINY SCREEN TWEAKS FOR POST DETAIL --- */
+@media (max-width: 380px) {
+    #post-detail-content .pd-title { font-size: 15px; }
+    #post-detail-content .pd-text { font-size: 13px; }
+    .pd-comment img { width: 28px; height: 28px; }
+}
+
+/* --- 10. LIGHTBOX FOR POST IMAGES (optional) --- */
+.post-image img,
+.pd-media img {
+    cursor: zoom-in;
+    transition: transform 0.25s ease;
+}
+.post-image img:active,
+.pd-media img:active {
+    transform: scale(0.99);
+}
+
+/* --- 11. HASH-LINK HIGHLIGHT (when opened via #hive/<id>) --- */
+.post-card.highlighted {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    animation: highlightPulse 1.4s ease 1;
+}
+@keyframes highlightPulse {
+    0%, 100% { box-shadow: var(--shadow-sm); }
+    50% { box-shadow: 0 0 0 6px var(--primary-subtle), var(--shadow-lg); }
 }
