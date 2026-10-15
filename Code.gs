@@ -1,21 +1,17 @@
 /**
- * Steeradar backend — v8.11 (Resilient Setup)
+ * Steeradar backend — v8.12
  * ============================================================================
- * v8.11 changes:
- *  - setup() runs each step in isolation (sheet migration, trigger install,
- *    pepper creation all wrapped separately) so one failure doesn't kill the run.
- *  - installTriggers() is idempotent — won't duplicate or error on re-run.
- *  - Added firstRun() helper that logs a clean checklist.
- *  - All v8.10 features retained:
- *      • insertLane dedupe (id + route+vehicle idempotent)
- *      • uploadImage tolerant of many client formats, 15 MB body cap
- *      • Approved-agent email shows vehicle/plate/selfie images
- *      • Vehicle + verification photos locked for active agents
- *      • Instagram-style Hive with likes + comments + share URLs
+ * v8.12 changes:
+ *   + lanes sheet: new `startTime` column for departure countdown
+ *   + laneFields() / publicLane() pass startTime through
+ *   + activeVehicles() joins users → returns photo/vehiclePhoto/platePhoto/rating
+ * Retains v8.11:
+ *   + Deduped insertLane, robust uploadImage, comments, share URLs, locked
+ *     agent profile, approval email with verification photos
  * ============================================================================
  */
 
-const VERSION = '8.11';
+const VERSION = '8.12';
 const APP_NAME = 'Steeradar';
 const APP_URL = 'https://suryasticsai.github.io/Steeradar/';
 const LOGO_URL = 'https://raw.githubusercontent.com/suryasticsai/Steeradar/main/steerardar-logo.png';
@@ -58,7 +54,7 @@ const SCHEMA = {
   lanes:        ['id','ownerPhone','driver','vehicle','vehicleType','community',
                  'title','description','photoUrl',
                  'from','via','to','total','taken','fare','lat','lng',
-                 'status','ts','peerId','lastSeen','showPlate'],
+                 'status','ts','peerId','lastSeen','showPlate','startTime'],
   hive:         ['id','ownerPhone','name','avatar','community',
                  'title','text','tags','time','likes','ts','vehicle',
                  'photoUrl','mediaUrl','mediaType'],
@@ -336,7 +332,6 @@ function emailPhotoTile(label, imgUrl, sub) {
 function buildOtp(code, purpose) {
   const heading = purpose === 'login' ? 'Welcome back!' : 'Welcome to Steeradar!';
   const sub = purpose === 'login' ? 'Use this code to sign back in.' : 'Use this code to verify your email.';
-
   const body = '<h1 style="margin:0 0 10px;color:' + INK + ';font-size:24px;font-weight:800;letter-spacing:-0.4px;">' + heading + '</h1>'
     + '<p style="margin:0 0 26px;color:' + MUTED + ';font-size:15px;line-height:1.6;">' + sub + '</p>'
     + '<div style="background:#F1F3F6;border-radius:14px;padding:28px 16px;text-align:center;margin:0 0 24px;">'
@@ -344,7 +339,6 @@ function buildOtp(code, purpose) {
     + '<div style="font-family:\'SF Mono\',\'Courier New\',monospace;font-size:42px;font-weight:800;letter-spacing:12px;color:' + INK + ';line-height:1;">' + code + '</div>'
     + '</div>'
     + '<p style="margin:0;color:' + SOFT + ';font-size:13px;line-height:1.7;">⏱️ Expires in <strong>10 minutes</strong></p>';
-
   return emailShell(body);
 }
 
@@ -1014,18 +1008,14 @@ H.adminApproveAgent = function (b, u) {
         status: 'approved', reviewedAt: reviewedAt, reviewedBy: u.phone
       });
     }
-
     const photos = {
       vehiclePhoto: driveUrl(appRow ? appRow.vehiclePhotoId : target.vehiclePhotoId, 900),
       platePhoto:   driveUrl(appRow ? appRow.platePhotoId   : target.platePhotoId, 900),
       selfie:       driveUrl(appRow ? appRow.selfieId       : '', 700)
     };
-
     try {
       sendAgentApprovedEmail(target.email, target.name, target.vehicle, target.vehicleType, photos);
-    } catch (e) {
-      Logger.log('Approved email failed: ' + e);
-    }
+    } catch (e) { Logger.log('Approved email failed: ' + e); }
   } else {
     updateRow('users', target._row, { role: 'user', agentStatus: 'rejected' });
     if (appRow) {
@@ -1065,6 +1055,7 @@ function publicLane(l, me) {
     lng: own ? round(l.lng, 7) : round(l.lng, 3),
     status: l.status, ts: Number(l.ts),
     createdAt: new Date(Number(l.ts)).toISOString(),
+    startTime: l.startTime || '',
     peerId: l.peerId, lastSeen: Number(l.lastSeen),
     showPlate: l.showPlate || 'true', own: own
   };
@@ -1086,7 +1077,8 @@ function laneFields(row, user, existing) {
     status: row.status === 'full' ? 'full' : 'live',
     peerId: /^steeradar-veh-[A-Z0-9-]{4,24}$/.test(String(row.peerId || '')) ? row.peerId : '',
     lastSeen: now(),
-    showPlate: String(row.showPlate) === 'false' ? 'false' : 'true'
+    showPlate: String(row.showPlate) === 'false' ? 'false' : 'true',
+    startTime: clean(row.startTime || '', 20)
   };
 }
 
@@ -1110,7 +1102,6 @@ H.insertLane = function (b, u) {
   const lanes = readAll('lanes');
   const t = now();
 
-  // 1) ID collision — update, don't append
   for (let i = 0; i < lanes.length; i++) {
     if (lanes[i].id === row.id) {
       if (lanes[i].ownerPhone !== u.phone) {
@@ -1122,7 +1113,6 @@ H.insertLane = function (b, u) {
     }
   }
 
-  // 2) Semantic duplicate — same vehicle + from + via + to, still live
   const normFrom = clean(row.from, 80).toLowerCase();
   const normVia  = clean(row.via, 200).toLowerCase();
   const normTo   = clean(row.to, 80).toLowerCase();
@@ -1145,7 +1135,6 @@ H.insertLane = function (b, u) {
     }
   }
 
-  // 3) Cap check, then append
   const mine = lanes.filter(function (l) {
     return l.ownerPhone === u.phone && t - Number(l.ts) < LANE_TTL_MS;
   });
@@ -1508,10 +1497,19 @@ H.updatePresence = function (b, u) {
 
 H.activeVehicles = function (b, u) {
   const t = now();
+  const users = readAll('users');
+  const byPhone = {};
+  for (let i = 0; i < users.length; i++) byPhone[users[i].phone] = users[i];
+
   const list = readAll('presence').filter(function (p) {
     return t - Number(p.lastSeen) < PRESENCE_TTL_MS;
   });
+
   return list.slice(0, 200).map(function (p) {
+    const usr = byPhone[p.phone] || {};
+    const rating = Number(usr.ratingCount) > 0
+      ? Math.round((Number(usr.ratingSum) / Number(usr.ratingCount)) * 10) / 10
+      : 5.0;
     return {
       vehicle: p.vehicle, phone: p.phone, owner: p.phone,
       name: p.name, ownerName: p.name, avatar: p.avatar,
@@ -1520,7 +1518,11 @@ H.activeVehicles = function (b, u) {
       lng: p.lng === '' ? '' : Number(p.lng),
       lastSeen: Number(p.lastSeen),
       updatedAt: new Date(Number(p.lastSeen)).toISOString(),
-      mine: u && p.phone === u.phone
+      mine: u && p.phone === u.phone,
+      photo:        usr.avatarId        ? driveUrl(usr.avatarId, 400)        : '',
+      vehiclePhoto: usr.vehiclePhotoId ? driveUrl(usr.vehiclePhotoId, 800) : '',
+      platePhoto:   usr.platePhotoId   ? driveUrl(usr.platePhotoId, 800)   : '',
+      rating: rating
     };
   });
 };
@@ -1903,69 +1905,31 @@ function doPost(e) {
   }
 }
 
-// ==================== SETUP (resilient) ====================
-/**
- * setup() — runs each step isolated. If one step fails, the rest still try,
- * and a clear checklist is logged. Re-runnable safely.
- */
+// ==================== SETUP ====================
 function setup() {
   Logger.log('=== Steeradar setup v' + VERSION + ' ===');
+  try { pepper(); Logger.log('✅ Pepper ensured'); }
+  catch (e) { Logger.log('❌ Pepper failed: ' + e); }
+  try { Logger.log('✅ Spreadsheet: ' + getSS().getUrl()); }
+  catch (e) { Logger.log('❌ Spreadsheet failed: ' + e); }
 
-  // 1) Pepper
-  try {
-    pepper();
-    Logger.log('✅ Pepper ensured');
-  } catch (e) {
-    Logger.log('❌ Pepper failed: ' + e);
-  }
-
-  // 2) Spreadsheet
-  try {
-    const ss = getSS();
-    Logger.log('✅ Spreadsheet ready: ' + ss.getUrl());
-  } catch (e) {
-    Logger.log('❌ Spreadsheet failed: ' + e);
-  }
-
-  // 3) Migrate each sheet
   const names = Object.keys(SCHEMA);
   let migrated = 0, failed = 0;
   for (let i = 0; i < names.length; i++) {
-    try {
-      migrateSheet(names[i]);
-      migrated++;
-    } catch (e) {
-      failed++;
-      Logger.log('❌ migrateSheet(' + names[i] + '): ' + e);
-    }
+    try { migrateSheet(names[i]); migrated++; }
+    catch (e) { failed++; Logger.log('❌ migrateSheet(' + names[i] + '): ' + e); }
   }
-  Logger.log('✅ Sheets migrated: ' + migrated + '/' + names.length +
-             (failed ? (' (' + failed + ' failed)') : ''));
+  Logger.log('✅ Sheets migrated: ' + migrated + '/' + names.length + (failed ? (' (' + failed + ' failed)') : ''));
 
-  // 4) Triggers
-  try {
-    installTriggers();
-    Logger.log('✅ Daily cleanup trigger installed');
-  } catch (e) {
-    Logger.log('⚠️  Trigger install failed (non-fatal): ' + e);
-    Logger.log('    → Fix by: Run this setup once manually after authorizing.');
-  }
+  try { installTriggers(); Logger.log('✅ Trigger installed'); }
+  catch (e) { Logger.log('⚠️ Trigger install failed (non-fatal): ' + e); }
 
-  // 5) Mail quota
-  try {
-    Logger.log('📧 Mail quota: ' + safeQuota());
-  } catch (e) {
-    Logger.log('⚠️  Mail quota check failed: ' + e);
-  }
+  try { Logger.log('📧 Mail quota: ' + safeQuota()); }
+  catch (e) { Logger.log('⚠️ Mail quota check failed: ' + e); }
 
   Logger.log('=== Setup complete ===');
-  Logger.log('Next: Deploy → New deployment → Web app → Anyone → Deploy');
 }
 
-/**
- * firstRun — call this ONE time after pasting the code, before anything else.
- * It authorizes every service so subsequent calls never hit "unknown error".
- */
 function firstRun() {
   Logger.log('Authorizing services…');
   try { PropertiesService.getScriptProperties().getKeys(); Logger.log('✅ PropertiesService'); } catch (e) { Logger.log('❌ Properties: ' + e); }
@@ -1974,12 +1938,10 @@ function firstRun() {
   try { MailApp.getRemainingDailyQuota(); Logger.log('✅ MailApp'); } catch (e) { Logger.log('❌ Mail: ' + e); }
   try { ScriptApp.getProjectTriggers(); Logger.log('✅ ScriptApp'); } catch (e) { Logger.log('❌ ScriptApp: ' + e); }
   try { CacheService.getScriptCache(); Logger.log('✅ CacheService'); } catch (e) { Logger.log('❌ Cache: ' + e); }
-  try { UrlFetchApp.getRequest('https://example.com'); Logger.log('✅ UrlFetchApp'); } catch (e) { Logger.log('❌ UrlFetch: ' + e); }
   Logger.log('Done. Now run setup().');
 }
 
 function installTriggers() {
-  // Remove any existing cleanup trigger first (idempotent)
   try {
     const triggers = ScriptApp.getProjectTriggers();
     for (let i = 0; i < triggers.length; i++) {
@@ -1987,11 +1949,7 @@ function installTriggers() {
         try { ScriptApp.deleteTrigger(triggers[i]); } catch (e) {}
       }
     }
-  } catch (e) {
-    Logger.log('Could not list triggers: ' + e);
-    throw e;
-  }
-
+  } catch (e) { Logger.log('Could not list triggers: ' + e); throw e; }
   ScriptApp.newTrigger('cleanup').timeBased().everyDays(1).atHour(3).create();
 }
 
@@ -2017,9 +1975,7 @@ function cleanup() {
   });
 }
 
-function showUrl() {
-  Logger.log('Sheet URL: ' + getSS().getUrl());
-}
+function showUrl() { Logger.log('Sheet URL: ' + getSS().getUrl()); }
 
 // ==================== TEST HELPERS ====================
 function testEmail() {
