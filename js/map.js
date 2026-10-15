@@ -1,12 +1,17 @@
 /**
  * ============================================================================
- * STEERADAR MAP MODULE (v13.1 — v14.1 compatible)
+ * STEERADAR MAP MODULE (v14.0)
  * ============================================================================
- * v13.1 change:
- *   - renderVehicles() now picks the pin icon from vehicleType
- *     (bike/two-wheeler 🛵, auto 🛺, car 🚗, bus 🚌, walk 🚶)
- *   - All other behavior identical to v13.0
- * Compatible with: index.html v14.1, app.js v14.1, api.js, features.js
+ * v14.0 changes:
+ *   + Long-press on map → dispatches 'steeradar:longpress' (quick-pin sheet)
+ *   + GPS accuracy ring + heading indicator on user location
+ *   + enableGPS() — start live tracking (toggles .tracking class on #btn-enable-gps)
+ *   + recenterMap() — smooth recenter + refit bounds
+ *   + Graceful handling of permission denials (fires 'steeradar:gps-denied')
+ *   + refreshSize() also re-fits bounds around markers
+ * Retains v13.1:
+ *   + Vehicle-type icons on pins (bike/auto/car/bus/walk)
+ *   + Everything from v13.0 (routing, search, alerts, trips, presence)
  * ============================================================================
  */
 
@@ -40,70 +45,29 @@ const MAP_THEMES = {
     }
 };
 
-// ============ MOCK AGENTS (for demo/testing) ============
+// ============ MOCK AGENTS ============
 const MOCK_AGENTS = [
     {
-        id: 'agent-1',
-        name: 'Agent A',
+        id: 'agent-1', name: 'Agent A',
         avatar: 'https://i.pravatar.cc/150?img=5',
-        rating: 4.8,
-        route: 'Koramangala to Jayanagar',
-        startTime: '10:30 AM',
-        occupancy: 41,
-        baseFare: 10,
-        distance: 5,
-        perKm: 1,
-        totalFare: 15,
-        vehicleModel: 'Honda Activa',
-        vehicleColor: 'Grey',
+        rating: 4.8, route: 'Koramangala to Jayanagar',
+        startTime: '10:30 AM', occupancy: 41,
+        baseFare: 10, distance: 5, perKm: 1, totalFare: 15,
+        vehicleModel: 'Honda Activa', vehicleColor: 'Grey',
         licensePlate: 'KA-05-XY-9876',
-        lat: 12.9352,
-        lng: 77.6245,
-        isLive: true,
-        hasSeats: true,
-        vehicleIcon: '🚗'
+        lat: 12.9352, lng: 77.6245,
+        isLive: true, hasSeats: true, vehicleIcon: '🚗'
     },
     {
-        id: 'agent-2',
-        name: 'Agent B',
+        id: 'agent-2', name: 'Agent B',
         avatar: 'https://i.pravatar.cc/150?img=12',
-        rating: 4.9,
-        route: 'Koramangala to Indiranagar via 12th Main',
-        startTime: '10:45 AM',
-        occupancy: 78,
-        baseFare: 10,
-        distance: 5,
-        perKm: 2,
-        totalFare: 20,
-        vehicleModel: 'Maruti Suzuki Ertiga',
-        vehicleColor: 'White',
+        rating: 4.9, route: 'Koramangala to Indiranagar via 12th Main',
+        startTime: '10:45 AM', occupancy: 78,
+        baseFare: 10, distance: 5, perKm: 2, totalFare: 20,
+        vehicleModel: 'Maruti Suzuki Ertiga', vehicleColor: 'White',
         licensePlate: 'KA-01-AB-1234',
-        lat: 12.9784,
-        lng: 77.6408,
-        isLive: true,
-        hasSeats: true,
-        vehicleIcon: '🚗'
-    },
-    {
-        id: 'agent-3',
-        name: 'Agent C',
-        avatar: 'https://i.pravatar.cc/150?img=8',
-        rating: 4.7,
-        route: 'Koramangala to Whitefield',
-        startTime: '11:00 AM',
-        occupancy: 90,
-        baseFare: 15,
-        distance: 10,
-        perKm: 1,
-        totalFare: 25,
-        vehicleModel: 'Toyota Innova',
-        vehicleColor: 'Silver',
-        licensePlate: 'KA-03-CD-5678',
-        lat: 12.9698,
-        lng: 77.7500,
-        isLive: true,
-        hasSeats: false,
-        vehicleIcon: '🚗'
+        lat: 12.9784, lng: 77.6408,
+        isLive: true, hasSeats: true, vehicleIcon: '🚗'
     }
 ];
 
@@ -119,6 +83,8 @@ let vehicleMarkers = [];
 let vehicleMarkersData = [];
 let userLocationMarker = null;
 let userLocationGlow = null;
+let userAccuracyCircle = null;
+let userHeadingMarker = null;
 let pickupPolyline = null;
 let pickupGlowPolyline = null;
 let pickupEndMarker = null;
@@ -130,11 +96,14 @@ let searchMarker = null;
 let mapInitialized = false;
 let liveLocationWatchId = null;
 let onMessageAgent = null;
+let longPressTimer = null;
+let longPressStart = null;
+let longPressTriggered = false;
+let lastKnownPosition = null;
+let gpsEnabled = false;
 
-// Agent (pulsing pin) state
 let agentMarkers = [];
 
-// v13.1: icon map for vehicle types
 const VEHICLE_ICONS = {
     bike: '🛵',
     'two-wheeler': '🛵',
@@ -190,9 +159,6 @@ function escapeHTML(str) {
         .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
-/**
- * Build the pulsing pin HTML used for both agents and real vehicles.
- */
 function buildPulsingPinHTML(agent) {
     const icon = agent.vehicleIcon || '🚗';
     const label = agent.startTime || 'Now';
@@ -206,6 +172,18 @@ function buildPulsingPinHTML(agent) {
             </div>
         </div>
     `;
+}
+
+function getGpsButton() {
+    return document.getElementById('btn-enable-gps');
+}
+
+function setGpsButtonState(state) {
+    const btn = getGpsButton();
+    if (!btn) return;
+    btn.classList.remove('tracking', 'locating');
+    if (state === 'tracking') btn.classList.add('tracking');
+    if (state === 'locating') btn.classList.add('locating');
 }
 
 // ============================================================================
@@ -246,10 +224,59 @@ export const mapModule = {
             L.control.zoom({ position: 'bottomright' }).addTo(map);
 
             map.on('click', (e) => {
+                if (longPressTriggered) { longPressTriggered = false; return; }
                 if (typeof onMapClick === 'function') {
                     onMapClick(e.latlng.lat, e.latlng.lng);
                 }
             });
+
+            // ⭐ v14: LONG-PRESS → dispatch event for quick-pin sheet
+            map.on('mousedown', (e) => {
+                longPressStart = { lat: e.latlng.lat, lng: e.latlng.lng, time: Date.now() };
+                longPressTriggered = false;
+                if (longPressTimer) clearTimeout(longPressTimer);
+                longPressTimer = setTimeout(() => {
+                    longPressTriggered = true;
+                    longPressTimer = null;
+                    // Small haptic tick
+                    if (navigator.vibrate) { try { navigator.vibrate(25); } catch (x) {} }
+                    // Notify the app
+                    try {
+                        window.dispatchEvent(new CustomEvent('steeradar:longpress', {
+                            detail: { lat: e.latlng.lat, lng: e.latlng.lng }
+                        }));
+                    } catch (x) {}
+                }, 600);
+            });
+
+            const cancelLongPress = () => {
+                if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+            };
+            map.on('mouseup', cancelLongPress);
+            map.on('dragstart', cancelLongPress);
+            map.on('zoomstart', cancelLongPress);
+            map.on('move', cancelLongPress);
+            map.on('mouseout', cancelLongPress);
+
+            // Touch long-press (mobile)
+            map.on('touchstart', (e) => {
+                if (!e.latlng) return;
+                longPressStart = { lat: e.latlng.lat, lng: e.latlng.lng, time: Date.now() };
+                longPressTriggered = false;
+                if (longPressTimer) clearTimeout(longPressTimer);
+                longPressTimer = setTimeout(() => {
+                    longPressTriggered = true;
+                    longPressTimer = null;
+                    if (navigator.vibrate) { try { navigator.vibrate(25); } catch (x) {} }
+                    try {
+                        window.dispatchEvent(new CustomEvent('steeradar:longpress', {
+                            detail: { lat: e.latlng.lat, lng: e.latlng.lng }
+                        }));
+                    } catch (x) {}
+                }, 600);
+            });
+            map.on('touchend', cancelLongPress);
+            map.on('touchmove', cancelLongPress);
 
             map.on('dragstart', () => mapModule.hideSearchResults());
 
@@ -333,15 +360,13 @@ export const mapModule = {
         }
     },
 
-    showRoadRoute: async (fromLat, fromLng, toLat, toLng, options = {}) => {
+    showRoadRoute: async (fromLat, fromLng, toLat, toLng) => {
         if (!ensureMap()) return null;
-
         mapModule.clearRoadRoute();
 
         const route = await mapModule.fetchRoadRoute(fromLat, fromLng, toLat, toLng);
 
         if (!route) {
-            console.warn('[map] Falling back to straight line');
             navigationLine = L.polyline(
                 [[fromLat, fromLng], [toLat, toLng]],
                 { color: '#4F46E5', weight: 5, opacity: 0.85, dashArray: '10,10' }
@@ -360,30 +385,22 @@ export const mapModule = {
 
         const originMarker = L.marker([fromLat, fromLng], {
             icon: customIcon(`
-                <div style="
-                    width: 16px; height: 16px;
-                    background: #fff;
-                    border: 3px solid #6b7280;
-                    border-radius: 50%;
-                    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-                "></div>
+                <div style="width: 16px; height: 16px; background: #fff;
+                    border: 3px solid #6b7280; border-radius: 50%;
+                    box-shadow: 0 2px 6px rgba(0,0,0,0.4);"></div>
             `, 16, [8, 8])
         }).addTo(map);
         routeMarkers.push(originMarker);
 
         const destMarker = L.marker([toLat, toLng], {
             icon: customIcon(`
-                <div style="
-                    width: 34px; height: 34px;
+                <div style="width: 34px; height: 34px;
                     background: linear-gradient(135deg, #ef4444, #dc2626);
-                    border: 3px solid #fff;
-                    border-radius: 50% 50% 50% 0;
+                    border: 3px solid #fff; border-radius: 50% 50% 50% 0;
                     transform: rotate(-45deg);
                     box-shadow: 0 4px 12px rgba(220,38,38,0.5);
-                    display: flex; align-items: center; justify-content: center;
-                "><i class="fas fa-map-marker-alt" style="
-                    color: #fff; font-size: 13px; transform: rotate(45deg);
-                "></i></div>
+                    display: flex; align-items: center; justify-content: center;">
+                <i class="fas fa-map-marker-alt" style="color: #fff; font-size: 13px; transform: rotate(45deg);"></i></div>
             `, 34, [17, 34])
         }).addTo(map);
         routeMarkers.push(destMarker);
@@ -395,20 +412,10 @@ export const mapModule = {
             icon: L.divIcon({
                 className: 'route-eta-badge',
                 html: `
-                    <div style="
-                        background: #4F46E5;
-                        color: #fff;
-                        padding: 6px 12px;
-                        border-radius: 20px;
-                        font-size: 12px;
-                        font-weight: 700;
-                        white-space: nowrap;
-                        box-shadow: 0 4px 12px rgba(79,70,229,0.5);
-                        display: flex;
-                        align-items: center;
-                        gap: 6px;
-                        font-family: -apple-system, sans-serif;
-                    ">
+                    <div style="background: #4F46E5; color: #fff; padding: 6px 12px;
+                        border-radius: 20px; font-size: 12px; font-weight: 700;
+                        white-space: nowrap; box-shadow: 0 4px 12px rgba(79,70,229,0.5);
+                        display: flex; align-items: center; gap: 6px; font-family: -apple-system, sans-serif;">
                         <i class="fas fa-car" style="font-size: 11px;"></i>
                         ${formatDuration(route.duration)}
                     </div>
@@ -542,17 +549,13 @@ export const mapModule = {
 
         if (searchMarker) map.removeLayer(searchMarker);
         const icon = customIcon(`
-            <div style="
-                width: 34px; height: 34px;
+            <div style="width: 34px; height: 34px;
                 background: linear-gradient(135deg, #4F46E5, #7C3AED);
-                border: 3px solid #fff;
-                border-radius: 50% 50% 50% 0;
+                border: 3px solid #fff; border-radius: 50% 50% 50% 0;
                 transform: rotate(-45deg);
                 box-shadow: 0 4px 12px rgba(79,70,229,0.5);
-                display: flex; align-items: center; justify-content: center;
-            "><i class="fas fa-search" style="
-                color: #fff; font-size: 12px; transform: rotate(45deg);
-            "></i></div>
+                display: flex; align-items: center; justify-content: center;">
+            <i class="fas fa-search" style="color: #fff; font-size: 12px; transform: rotate(45deg);"></i></div>
         `, 34, [17, 34]);
 
         searchMarker = L.marker([lat, lng], { icon }).addTo(map);
@@ -564,15 +567,14 @@ export const mapModule = {
                 <div style="font-size:10px; color:#6b7280; margin-bottom:8px;">
                     ${escapeHTML(place.display_name).slice(0, 90)}
                 </div>
-                <button onclick="mapModule.navigateToSearch()" style="
-                    background:#00b88a; color:#fff; border:none; padding:6px 12px;
-                    border-radius:6px; cursor:pointer; font-weight:bold; font-size:11px;
-                    margin-right:4px;
-                "><i class="fas fa-directions"></i> Navigate</button>
-                <button onclick="mapModule.saveSearchAsPin()" style="
-                    background:#f3f4f6; color:#111; border:1px solid #e5e7eb; padding:6px 12px;
-                    border-radius:6px; cursor:pointer; font-weight:bold; font-size:11px;
-                "><i class="fas fa-bookmark"></i> Save</button>
+                <button onclick="mapModule.navigateToSearch()" style="background:#00b88a; color:#fff; border:none; padding:6px 12px;
+                    border-radius:6px; cursor:pointer; font-weight:bold; font-size:11px; margin-right:4px;">
+                    <i class="fas fa-directions"></i> Navigate
+                </button>
+                <button onclick="mapModule.saveSearchAsPin()" style="background:#f3f4f6; color:#111; border:1px solid #e5e7eb; padding:6px 12px;
+                    border-radius:6px; cursor:pointer; font-weight:bold; font-size:11px;">
+                    <i class="fas fa-bookmark"></i> Save
+                </button>
             </div>
         `).openPopup();
 
@@ -615,17 +617,13 @@ export const mapModule = {
         if (savedMarker) { map.removeLayer(savedMarker); savedMarker = null; }
 
         const icon = customIcon(`
-            <div style="
-                width: 32px; height: 32px;
+            <div style="width: 32px; height: 32px;
                 background: linear-gradient(135deg, #00b88a, #00a37a);
-                border: 3px solid #fff;
-                border-radius: 50% 50% 50% 0;
+                border: 3px solid #fff; border-radius: 50% 50% 50% 0;
                 transform: rotate(-45deg);
                 box-shadow: 0 4px 12px rgba(0,184,138,0.5);
-                display: flex; align-items: center; justify-content: center;
-            "><i class="fas fa-map-marker-alt" style="
-                color: #fff; font-size: 12px; transform: rotate(45deg);
-            "></i></div>
+                display: flex; align-items: center; justify-content: center;">
+            <i class="fas fa-map-marker-alt" style="color: #fff; font-size: 12px; transform: rotate(45deg);"></i></div>
         `, 32, [16, 32]);
 
         savedMarker = L.marker([lat, lng], { icon }).addTo(map);
@@ -662,7 +660,7 @@ export const mapModule = {
     },
 
     // ========================================================================
-    // AGENTS (Pulsing Pins)
+    // AGENTS
     // ========================================================================
     renderAgents: (agents = MOCK_AGENTS) => {
         if (!ensureMap() || !Array.isArray(agents)) return;
@@ -719,12 +717,11 @@ export const mapModule = {
         if (!ensureMap()) return null;
         const icons = { traffic: '🚧', pothole: '🕳️', police: '🚓', accident: '⚠️' };
         const icon = customIcon(`
-            <div style="
-                background: #fff; border: 2px solid #f59e0b;
+            <div style="background: #fff; border: 2px solid #f59e0b;
                 border-radius: 50%; width: 32px; height: 32px;
                 display: flex; align-items: center; justify-content: center;
-                font-size: 15px; box-shadow: 0 3px 10px rgba(245,158,11,0.5);
-            ">${icons[type] || '⚠️'}</div>
+                font-size: 15px; box-shadow: 0 3px 10px rgba(245,158,11,0.5);">
+            ${icons[type] || '⚠️'}</div>
         `, 32, [16, 16]);
 
         const marker = L.marker([lat, lng], { icon }).addTo(map);
@@ -745,7 +742,7 @@ export const mapModule = {
     },
 
     // ========================================================================
-    // VEHICLE MARKERS (Real data from API — pulsing pins)
+    // VEHICLE MARKERS
     // ========================================================================
     renderVehicles: (vehicles = [], myLocation = null) => {
         if (!ensureMap() || !Array.isArray(vehicles)) return;
@@ -757,15 +754,13 @@ export const mapModule = {
             if (!v.lat || !v.lng) return;
             const isMine = v.mine;
             const color = isMine ? '#00b88a' : '#4F46E5';
-
-            // ⭐ v13.1: pick icon from vehicleType
             const vehicleIcon = VEHICLE_ICONS[v.vehicleType] || '🚗';
 
-            // Build an agent-like object for the bottom sheet
             const agentData = {
                 id: v.id || v.phone,
                 name: v.ownerName || v.name || 'SteerAgent',
-                avatar: v.photo || 'https://i.pravatar.cc/150?img=12',
+                phone: v.phone || v.owner || '',
+                avatar: v.photo || v.avatar || 'https://i.pravatar.cc/150?img=12',
                 rating: v.rating || 4.8,
                 route: v.route || v.description || 'On the road',
                 startTime: v.startTime || 'Now',
@@ -778,7 +773,10 @@ export const mapModule = {
                 vehicleColor: v.vehicleColor || '—',
                 licensePlate: v.vehicle || 'N/A',
                 vehicleType: v.vehicleType || 'car',
-                vehicleIcon: vehicleIcon
+                vehicleIcon: vehicleIcon,
+                vehiclePhoto: v.vehiclePhoto || '',
+                platePhoto:   v.platePhoto   || '',
+                selfie:       v.selfie       || ''
             };
 
             const iconHtml = buildPulsingPinHTML(agentData);
@@ -873,7 +871,7 @@ export const mapModule = {
     },
 
     // ========================================================================
-    // NAVIGATION (opens Google Maps)
+    // NAVIGATION
     // ========================================================================
     navigateTo: (destLat, destLng, fromLat = null, fromLng = null) => {
         const dest = `${destLat},${destLng}`;
@@ -891,16 +889,13 @@ export const mapModule = {
         mapModule.clearPickupRoute();
 
         const destIcon = customIcon(`
-            <div style="
-                width: 30px; height: 30px;
+            <div style="width: 30px; height: 30px;
                 background: linear-gradient(135deg, #ef4444, #dc2626);
                 border: 3px solid #fff; border-radius: 50% 50% 50% 0;
                 transform: rotate(-45deg);
                 box-shadow: 0 4px 12px rgba(220,38,38,0.5);
-                display: flex; align-items: center; justify-content: center;
-            "><i class="fas fa-flag-checkered" style="
-                color: #fff; font-size: 11px; transform: rotate(45deg);
-            "></i></div>
+                display: flex; align-items: center; justify-content: center;">
+            <i class="fas fa-flag-checkered" style="color: #fff; font-size: 11px; transform: rotate(45deg);"></i></div>
         `, 30, [15, 30]);
 
         pickupEndMarker = L.marker([toLat, toLng], { icon: destIcon }).addTo(map);
@@ -1001,6 +996,7 @@ export const mapModule = {
     // DISTANCE & UTILITIES
     // ========================================================================
     calculateDistance: (lat1, lng1, lat2, lng2) => haversine(lat1, lng1, lat2, lng2),
+
     calculatePolylineDistance: (coords) => {
         if (!coords || coords.length < 2) return 0;
         let total = 0;
@@ -1009,19 +1005,34 @@ export const mapModule = {
         }
         return total;
     },
+
     formatDistance: (km) => formatDistance(km),
     formatDuration: (mins) => formatDuration(mins),
 
     // ========================================================================
     // RECENTER / LIVE LOCATION
     // ========================================================================
+
+    /** Recenter the map on the user's location, smooth animation. */
     recenter: async () => {
         try {
             const loc = await mapModule.locateUser(false);
-            if (loc) map.setView([loc.lat, loc.lng], 15, { animate: true });
-        } catch (e) { console.warn('[map] Recenter failed:', e); }
+            if (loc) {
+                map.setView([loc.lat, loc.lng], Math.max(map.getZoom(), 15), { animate: true });
+            }
+        } catch (e) {
+            console.warn('[map] Recenter failed:', e);
+            // Bubble up for the app to toast
+            window.dispatchEvent(new CustomEvent('steeradar:gps-denied', {
+                detail: { reason: e && e.message ? e.message : 'Location unavailable' }
+            }));
+        }
     },
 
+    /**
+     * Get the current position once.
+     * @param {boolean} centerIfFound — if true, the map centers on the user
+     */
     locateUser: (centerIfFound = false) => {
         return new Promise((resolve, reject) => {
             if (!ensureMap()) return reject(new Error('Map not ready'));
@@ -1029,46 +1040,137 @@ export const mapModule = {
 
             navigator.geolocation.getCurrentPosition(
                 (pos) => {
-                    const { latitude, longitude } = pos.coords;
-                    if (centerIfFound) map.setView([latitude, longitude], 15, { animate: true });
+                    const { latitude, longitude, accuracy, heading } = pos.coords;
+                    lastKnownPosition = { lat: latitude, lng: longitude, accuracy };
 
-                    if (userLocationMarker) {
-                        userLocationMarker.setLatLng([latitude, longitude]);
-                        if (userLocationGlow) userLocationGlow.setLatLng([latitude, longitude]);
-                    } else {
-                        userLocationMarker = L.circleMarker([latitude, longitude], {
-                            radius: 8, color: '#00b88a', fillColor: '#00b88a',
-                            fillOpacity: 1, weight: 3
-                        }).addTo(map);
-
-                        userLocationGlow = L.circleMarker([latitude, longitude], {
-                            radius: 20, color: '#00b88a', fillColor: '#00b88a',
-                            fillOpacity: 0.15, weight: 1
-                        }).addTo(map);
+                    if (centerIfFound) {
+                        map.setView([latitude, longitude], Math.max(map.getZoom(), 15), { animate: true });
                     }
-                    resolve({ lat: latitude, lng: longitude });
+                    mapModule._renderUserLocation(latitude, longitude, accuracy, heading);
+                    resolve({ lat: latitude, lng: longitude, accuracy });
                 },
-                (err) => reject(err),
+                (err) => {
+                    const msg = (err && err.message) || 'Location denied';
+                    console.warn('[map] locateUser:', msg);
+                    setGpsButtonState('off');
+                    gpsEnabled = false;
+                    window.dispatchEvent(new CustomEvent('steeradar:gps-denied', {
+                        detail: { reason: msg, code: err && err.code }
+                    }));
+                    reject(err);
+                },
                 { enableHighAccuracy: true, maximumAge: 10000, timeout: 10000 }
             );
         });
     },
 
+    /** Renders the user's dot + accuracy ring + heading marker. */
+    _renderUserLocation: (latitude, longitude, accuracy, heading) => {
+        if (!map) return;
+
+        // Dot
+        if (userLocationMarker) {
+            userLocationMarker.setLatLng([latitude, longitude]);
+        } else {
+            userLocationMarker = L.circleMarker([latitude, longitude], {
+                radius: 8, color: '#00b88a', fillColor: '#00b88a',
+                fillOpacity: 1, weight: 3
+            }).addTo(map);
+        }
+
+        // Glow
+        if (userLocationGlow) {
+            userLocationGlow.setLatLng([latitude, longitude]);
+        } else {
+            userLocationGlow = L.circleMarker([latitude, longitude], {
+                radius: 20, color: '#00b88a', fillColor: '#00b88a',
+                fillOpacity: 0.15, weight: 1
+            }).addTo(map);
+        }
+
+        // ⭐ v14: accuracy circle (radius in meters)
+        if (isFinite(accuracy) && accuracy > 0 && accuracy < 2000) {
+            if (userAccuracyCircle) {
+                userAccuracyCircle.setLatLng([latitude, longitude]);
+                userAccuracyCircle.setRadius(accuracy);
+            } else {
+                userAccuracyCircle = L.circle([latitude, longitude], {
+                    radius: accuracy,
+                    color: '#00b88a',
+                    weight: 1,
+                    opacity: 0.4,
+                    fillColor: '#00b88a',
+                    fillOpacity: 0.08
+                }).addTo(map);
+            }
+        }
+
+        // ⭐ v14: heading indicator (if supported and heading is valid)
+        if (isFinite(heading) && heading >= 0) {
+            const headingHTML = `
+                <div style="
+                    width: 0; height: 0;
+                    border-left: 6px solid transparent;
+                    border-right: 6px solid transparent;
+                    border-bottom: 10px solid #00b88a;
+                    transform: rotate(${heading}deg);
+                    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+                "></div>`;
+            const headingIcon = L.divIcon({
+                className: 'user-heading-marker',
+                html: headingHTML,
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+            if (userHeadingMarker) {
+                userHeadingMarker.setLatLng([latitude, longitude]);
+                userHeadingMarker.setIcon(headingIcon);
+            } else {
+                userHeadingMarker = L.marker([latitude, longitude], {
+                    icon: headingIcon,
+                    interactive: false
+                }).addTo(map);
+            }
+        }
+    },
+
+    /** Start live GPS tracking. Toggles the GPS button state. */
     startLiveLocation: () => {
-        if (!navigator.geolocation || liveLocationWatchId !== null) return;
+        if (!navigator.geolocation) {
+            setGpsButtonState('off');
+            return;
+        }
+        if (liveLocationWatchId !== null) return; // already tracking
+
+        setGpsButtonState('locating');
+
         liveLocationWatchId = navigator.geolocation.watchPosition(
             (pos) => {
-                const { latitude, longitude } = pos.coords;
-                if (userLocationMarker) {
-                    userLocationMarker.setLatLng([latitude, longitude]);
-                    if (userLocationGlow) userLocationGlow.setLatLng([latitude, longitude]);
-                }
+                const { latitude, longitude, accuracy, heading } = pos.coords;
+                lastKnownPosition = { lat: latitude, lng: longitude, accuracy };
+
+                mapModule._renderUserLocation(latitude, longitude, accuracy, heading);
+
+                gpsEnabled = true;
+                setGpsButtonState('tracking');
+
                 window.dispatchEvent(new CustomEvent('userLocationUpdate', {
-                    detail: { lat: latitude, lng: longitude }
+                    detail: { lat: latitude, lng: longitude, accuracy }
                 }));
             },
-            (err) => console.warn('[map] Watch error:', err.message),
-            { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+            (err) => {
+                console.warn('[map] Watch error:', err.message);
+                // If the user denied permission, don't keep retrying silently
+                if (err && (err.code === 1 || /denied/i.test(err.message))) {
+                    mapModule.stopLiveLocation();
+                    setGpsButtonState('off');
+                    gpsEnabled = false;
+                    window.dispatchEvent(new CustomEvent('steeradar:gps-denied', {
+                        detail: { reason: 'Location permission denied', code: err.code }
+                    }));
+                }
+            },
+            { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
         );
     },
 
@@ -1077,7 +1179,23 @@ export const mapModule = {
             navigator.geolocation.clearWatch(liveLocationWatchId);
             liveLocationWatchId = null;
         }
+        setGpsButtonState('off');
+        gpsEnabled = false;
     },
+
+    /** Toggle — used by the map control bar's Enable GPS button. */
+    toggleLiveLocation: () => {
+        if (liveLocationWatchId !== null) {
+            mapModule.stopLiveLocation();
+            return { tracking: false };
+        }
+        mapModule.startLiveLocation();
+        return { tracking: true };
+    },
+
+    isGpsTracking: () => liveLocationWatchId !== null,
+
+    getLastKnownPosition: () => lastKnownPosition,
 
     // ========================================================================
     // MISC
@@ -1098,10 +1216,23 @@ export const mapModule = {
         map.fitBounds(coords, { padding });
     },
 
+    /** ⭐ v14: refreshSize also re-fits bounds to visible markers. */
     refreshSize: () => {
         if (!map) return;
         requestAnimationFrame(() => map.invalidateSize());
         setTimeout(() => { if (map) map.invalidateSize(); }, 250);
+
+        // After resize, if we have markers, gently refit to them
+        setTimeout(() => {
+            if (!map) return;
+            const all = [].concat(vehicleMarkers, agentMarkers, tempMarkers);
+            if (all.length) {
+                try {
+                    const group = L.featureGroup(all);
+                    map.fitBounds(group.getBounds().pad(0.15), { animate: true, maxZoom: 16 });
+                } catch (e) { /* ignore */ }
+            }
+        }, 450);
     },
 
     clearAll: () => {
@@ -1119,4 +1250,4 @@ export const mapModule = {
     MOCK_AGENTS: MOCK_AGENTS
 };
 
-console.log('[map] Module v13.1 loaded (v14.1 compatible)');
+console.log('[map] Module v14.0 loaded');
