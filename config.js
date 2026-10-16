@@ -1,5 +1,5 @@
 window.STEERADAR = {
-  SHEET_API_URL: 'https://script.google.com/macros/s/AKfycbyqNpDc8Abx77hPAy6lwp6muwaxG3_Xr_SIkOyKlI75f6QH8LftKFK6wRiu4nJxt61D/exec',
+  SHEET_API_URL: 'https://script.google.com/macros/s/AKfycbwn0EAyRz4XSmAsVSRfZwRMbAuARGFbRAb5N-JkHtaGT9SAccMOyvmaAejidEj5umw7WA/exec',
 
   CLOUD_SYNC_DEFAULT: true,
   APP_NAME: 'Steeradar',
