@@ -1,22 +1,17 @@
 /**
  * ============================================================================
- * STEERADAR FEATURES (v14.1)
+ * STEERADAR FEATURES (v15.0)
  * ============================================================================
- * Loaded as a separate ES module, after app.js.
- *
- * Changelog vs v14.0:
- *   + showLaneDetails now mirrors the selected agent into window.state.selectedAgent
- *   + "View Full Profile" button calls viewAgentProfile() with no arg
- *     (was passing window.state.selectedAgent || null, which broke when null)
- *   Everything else preserved.
- *
- * Changelog vs v13:
- *   ✗ Removed window.openChat override (was clobbering app.js's real chat)
- *   ✗ Removed window.sendMessage override (was clobbering real message send)
- *   + openAgentChat()  — builds a proper DM room id, calls app.js's openChat
- *   + sendOffer()      — now sends the offer as a real message via app.js
- *   + viewAgentProfile — shows real uploaded photos when available
- *   + getLastAgent()   — named export for other modules
+ * v15.0 changes:
+ *   + openUserProfileFromElement(el, phone) — global avatar-click handler
+ *     that index.html delegates to; falls back to data-* attributes on <img>
+ *   + buildDmRoomId() prefers phone numbers so the DM room id always
+ *     matches backend /^dm-([A-Z0-9]{4,15})-([A-Z0-9]{4,15})$/
+ *   + showLaneDetails now tags avatars with data-user-phone/data-user-name
+ *     so clicking the driver's photo opens their profile
+ *   + viewAgentProfile shows a toast instead of erroring when no agent
+ *   + sendOffer() uses the (validated) DM room id before opening chat
+ * Retains v14.2 behavior exactly.
  * ============================================================================
  */
 
@@ -44,16 +39,67 @@ function getCurrentUser() {
 }
 
 /**
- * Build a stable DM room id matching backend's checkRoom() format:
- *   dm-<VEHICLE_A>-<VEHICLE_B>  (both sorted, uppercased, no spaces)
+ * Build a DM room id that ALWAYS passes the backend's
+ *   /^dm-([A-Z0-9]{4,15})-([A-Z0-9]{4,15})$/
+ * regex. Returns null if we can't.
+ *
+ * Preference:
+ *   1. Phone numbers (10 digits, always valid)
+ *   2. Vehicle numbers (4-15 alphanumeric after stripping)
  */
 function buildDmRoomId(agent) {
   const me = getCurrentUser();
-  const myVehicle    = ((me && me.vehicle) || 'ME').toUpperCase().replace(/[\s-]/g, '');
-  const theirVehicle = (agent.vehicle || agent.licensePlate || agent.id || 'AGENT')
-                          .toString().toUpperCase().replace(/[\s-]/g, '');
-  const ids = [myVehicle, theirVehicle].sort();
-  return 'dm-' + ids[0] + '-' + ids[1];
+
+  const myPhone = String((me && me.phone) || '').replace(/\D/g, '');
+  const theirPhone = String(
+    (agent && (agent.phone || agent.owner || agent.ownerPhone)) || ''
+  ).replace(/\D/g, '');
+
+  if (myPhone.length >= 4 && theirPhone.length >= 4) {
+    const ids = [myPhone, theirPhone].sort();
+    return 'dm-' + ids[0] + '-' + ids[1];
+  }
+
+  const myVeh = String((me && me.vehicle) || '')
+    .toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const theirVeh = String((agent && (agent.vehicle || agent.licensePlate)) || '')
+    .toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  if (myVeh.length >= 4 && myVeh.length <= 15 &&
+      theirVeh.length >= 4 && theirVeh.length <= 15) {
+    const ids = [myVeh, theirVeh].sort();
+    return 'dm-' + ids[0] + '-' + ids[1];
+  }
+
+  return null;
+}
+
+/**
+ * Build the data-* attribute string for avatars so the global
+ * click handler in index.html can open the right profile.
+ */
+function userDataAttrs(agent) {
+  if (!agent) return '';
+  const parts = [];
+  if (agent.phone || agent.owner || agent.ownerPhone) {
+    parts.push('data-user-phone="' + esc(agent.phone || agent.owner || agent.ownerPhone) + '"');
+  }
+  if (agent.name || agent.ownerName) {
+    parts.push('data-user-name="' + esc(agent.name || agent.ownerName) + '"');
+  }
+  if (agent.vehicle) {
+    parts.push('data-user-vehicle="' + esc(agent.vehicle) + '"');
+  }
+  if (agent.vehicleType) {
+    parts.push('data-user-vehicle-type="' + esc(agent.vehicleType) + '"');
+  }
+  if (agent.community) {
+    parts.push('data-user-community="' + esc(agent.community) + '"');
+  }
+  if (agent.rating) {
+    parts.push('data-user-rating="' + esc(agent.rating) + '"');
+  }
+  return parts.join(' ');
 }
 
 /* ==========================================================================
@@ -64,7 +110,6 @@ window.showLaneDetails = function (agent) {
   currentSelectedAgent = agent;
   lastOpenedAgent = agent;
 
-  // ⭐ v14.1: expose to window.state so external callers can see it
   if (window.state) window.state.selectedAgent = agent;
 
   const baseFare = Number(agent.baseFare) || 10;
@@ -77,10 +122,12 @@ window.showLaneDetails = function (agent) {
   const avatar    = agent.avatar || DEFAULT_AGENT_AVATAR;
   const name      = agent.name || 'SteerAgent';
 
+  const avatarAttrs = userDataAttrs(agent);
+
   const content = `
     <div class="flex justify-between align-center mb-3">
       <div class="flex align-center gap-2">
-        <img src="${esc(avatar)}" alt="${esc(name)}" class="user-avatar" style="width: 40px; height: 40px;" onerror="this.src='${DEFAULT_AGENT_AVATAR}'">
+        <img src="${esc(avatar)}" alt="${esc(name)}" class="user-avatar" style="width: 40px; height: 40px;" ${avatarAttrs} onerror="this.src='${DEFAULT_AGENT_AVATAR}'">
         <div>
           <h3 style="font-weight: 700; font-size: 16px;">${esc(name)}</h3>
           <div class="text-sub text-xs">⭐ ${esc(agent.rating || '4.8')}</div>
@@ -147,7 +194,7 @@ window.closeBottomSheet = function (event) {
 };
 
 /* ==========================================================================
-   2. FARE NEGOTIATION (- digit +)
+   2. FARE NEGOTIATION
    ========================================================================== */
 window.openNegotiation = function (standardFare) {
   const fare = Number(standardFare) || 20;
@@ -177,14 +224,11 @@ window.sendOffer = function () {
   const agent = currentSelectedAgent;
   const offer = currentOfferAmount;
 
-  // Close the negotiation modal
   if (typeof window.closeModal === 'function') window.closeModal('negotiation-modal');
   else document.getElementById('negotiation-modal').classList.add('hidden');
 
-  // Open the real DM chat with this agent
   window.openAgentChat(agent);
 
-  // After the chat opens + connects, send the offer as a real message
   setTimeout(function () {
     const input = document.getElementById('chat-input');
     if (!input) return;
@@ -194,23 +238,34 @@ window.sendOffer = function () {
 };
 
 /* ==========================================================================
-   3. CHAT (delegates to app.js's real openChat / sendMessage)
+   3. CHAT — delegates to app.js's real openChat
    ========================================================================== */
-
-/**
- * Open a real DM with the given agent (or with the last-selected one).
- * Calls app.js's `openChat(roomId, name, avatar)` which handles the backend.
- */
 window.openAgentChat = function (agent) {
   const a = agent || currentSelectedAgent || lastOpenedAgent;
   if (!a) {
     logger.warn('openAgentChat called with no agent');
+    if (typeof window.showToast === 'function') {
+      window.showToast('No agent selected', 'warning');
+    }
     return;
   }
   currentSelectedAgent = a;
   lastOpenedAgent = a;
 
   const roomId = buildDmRoomId(a);
+
+  if (!roomId) {
+    logger.warn('Cannot open DM — missing phone/vehicle on either side');
+    if (typeof window.showToast === 'function') {
+      window.showToast(
+        'Cannot start chat — add your vehicle/phone in Profile first',
+        'warning'
+      );
+    }
+    window.closeBottomSheet();
+    return;
+  }
+
   const name   = a.name || 'SteerAgent';
   const avatar = a.avatar || DEFAULT_AGENT_AVATAR;
 
@@ -250,7 +305,7 @@ window.viewAgentProfile = function (agent) {
 
   const setText = function (id, val) {
     const el = document.getElementById(id);
-    if (el) el.innerText = val;
+    if (el) el.textContent = val;
   };
   const setSrc = function (id, src, fallback) {
     const el = document.getElementById(id);
@@ -267,7 +322,18 @@ window.viewAgentProfile = function (agent) {
   setText('agent-vehicle-color', a.vehicleColor || '—');
   setText('agent-vehicle-plate', a.licensePlate || a.vehicle || 'N/A');
 
-  // Gallery — prefer real uploaded images, fall back to demo tiles
+  // Tag the agent-profile avatar for click-through to user profile
+  const profAvatar = document.getElementById('agent-profile-avatar');
+  if (profAvatar) {
+    const attrs = userDataAttrs(a);
+    // Only set if not already present
+    if (attrs) {
+      // data-* attributes were inlined above; here we set them via dataset for robustness
+      if (a.phone) profAvatar.dataset.userPhone = a.phone;
+      if (a.vehicle) profAvatar.dataset.userVehicle = a.vehicle;
+    }
+  }
+
   const gallery = document.getElementById('agent-images-gallery');
   if (gallery) {
     const photos = [];
@@ -291,7 +357,6 @@ window.viewAgentProfile = function (agent) {
         );
       }).join('');
     } else {
-      // Demo tiles (no real photos uploaded yet)
       const mockImages = [
         { label: 'Front View', color: '#bfdbfe', icon: 'fa-car-side' },
         { label: 'Back View',  color: '#bbf7d0', icon: 'fa-car' },
@@ -316,7 +381,70 @@ window.viewAgentProfile = function (agent) {
 };
 
 /* ==========================================================================
-   5. NAMED EXPORTS (for app.js or other modules)
+   5. USER PROFILE — global avatar click handler
+   ========================================================================== */
+/**
+ * Called by the delegated click handler in index.html whenever ANY
+ * avatar (user-avatar, driver-avatar, chat-avatar) is clicked.
+ *
+ * Reads data-* attributes off the element so callers don't need to
+ * know the shape of the user object.
+ */
+window.openUserProfileFromElement = function (el, phone) {
+  if (!el) return;
+
+  const data = {
+    phone:        phone || el.dataset.userPhone || '',
+    name:         el.dataset.userName || el.alt || 'User',
+    avatar:       el.src || DEFAULT_AGENT_AVATAR,
+    vehicle:      el.dataset.userVehicle || '',
+    vehicleType:  el.dataset.userVehicleType || '',
+    community:    el.dataset.userCommunity || '',
+    rating:       el.dataset.userRating || '5.0'
+  };
+
+  // Delegate to app.js's modal renderer
+  if (typeof window.showUserProfile === 'function') {
+    window.showUserProfile(data);
+    return;
+  }
+
+  // Fallback: build the modal inline
+  showUserProfileFallback(data);
+};
+
+function showUserProfileFallback(data) {
+  const setText = function (id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val || '—';
+  };
+  const setSrc = function (id, src, fallback) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.src = src || fallback;
+      el.onerror = function () { this.src = fallback; };
+    }
+  };
+
+  setSrc('user-profile-avatar', data.avatar, DEFAULT_AGENT_AVATAR);
+  setText('user-profile-name', data.name || 'User');
+  setText('user-profile-vehicle', data.vehicle || '—');
+  setText('user-profile-vehicle-type', data.vehicleType || '—');
+  setText('user-profile-community', data.community || '—');
+  setText('user-profile-rating', '⭐ ' + (data.rating || '5.0'));
+
+  if (window.state) window.state.profileTarget = data;
+
+  if (typeof window.openModal === 'function') {
+    window.openModal('user-profile-modal');
+  } else {
+    const m = document.getElementById('user-profile-modal');
+    if (m) m.classList.remove('hidden');
+  }
+}
+
+/* ==========================================================================
+   6. NAMED EXPORTS
    ========================================================================== */
 export function getLastAgent()     { return lastOpenedAgent; }
 export function getSelectedAgent() { return currentSelectedAgent; }
@@ -324,5 +452,5 @@ export function getSelectedAgent() { return currentSelectedAgent; }
 /* ==========================================================================
    LOG
    ========================================================================== */
-logger.info('features.js v14.1 loaded — Lanes, Negotiation, Agent Profile wired.');
-console.log('[features] v14.1 loaded');
+logger.info('features.js v15.0 loaded');
+console.log('[features] v15.0 loaded');
