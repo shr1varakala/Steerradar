@@ -1,766 +1,506 @@
+
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>SteerRadar · Community Ride Network</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Steerradar Smart Community Transport</title>
 
-    <!-- ============ SHARE / SOCIAL META ============ -->
-    <meta name="description" content="SteerRadar — Real-time community rides, live driver lanes, and the Hive social feed. Ride together, save money, build trust.">
-    <meta property="og:site_name" content="SteerRadar">
-    <meta property="og:title" content="SteerRadar · Community Ride Network">
-    <meta property="og:description" content="Real-time community rides, live driver lanes, and the Hive.">
-    <meta property="og:type" content="website">
-    <meta property="og:image" content="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steeradar-logo.png">
-    <meta property="og:url" content="https://suryasticsai.github.io/steerradar/">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="SteerRadar · Community Ride Network">
-    <meta name="twitter:description" content="Real-time community rides, live driver lanes, and the Hive.">
-    <meta name="twitter:image" content="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steeradar-logo.png">
+<link rel="stylesheet"
+ href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#00d4a0">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="SteerRadar">
-    <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steeradar-logo.png">
-    <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steeradar-logo.png">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="css/style.css">
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #0c1724;
+  color: #fff;
+  font-family: Arial, sans-serif;
+}
+header {
+  padding: 15px;
+  background: #102638;
+}
+h2 { margin: 0 0 7px; color: #20dfba; }
+p { line-height: 1.5; }
+.small { font-size: 12px; color: #b4c7d4; }
+#map { height: 43vh; min-height: 280px; }
+.controls {
+  padding: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+button, select {
+  border: 0;
+  border-radius: 9px;
+  padding: 11px;
+  font-size: 14px;
+}
+button {
+  background: #20dfba;
+  color: #081721;
+  font-weight: bold;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; }
+select {
+  flex: 1;
+  background: #20384a;
+  color: white;
+}
+#status { padding: 8px 14px; }
+#results { padding: 12px; }
+.card {
+  background: #193144;
+  padding: 14px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+}
+.card.best { border: 2px solid #20dfba; }
+.card h3 { margin: 0 0 8px; color: #20dfba; }
+.actions { display: flex; gap: 8px; }
+.actions button { flex: 1; }
+a { color: #20dfba; }
+</style>
 </head>
+
 <body>
+<header>
+  <h2>Steerradar</h2>
+  <div>Smart Community Transport Explorer</div>
+  <p class="small">
+    Nearby transport, public places and personalized suggestions
+  </p>
+</header>
 
-<a href="./bus-stops.html"
-   style="
-      position:fixed;
-      bottom:90px;
-      right:16px;
-      z-index:9999;
-      background:#19cba5;
-      color:#071923;
-      padding:14px 18px;
-      border-radius:30px;
-      font-weight:bold;
-      text-decoration:none;
-      box-shadow:0 4px 12px #0005;
-   ">
-   Nearby Bus Stops
-</a>
+<div id="map"></div>
 
-<div id="app-container">
-
-    <!-- ================= HEADER ================= -->
-    <header id="main-header">
-        <div class="logo-text" id="logo-trigger" title="Long-press for logs">
-            <img src="https://raw.githubusercontent.com/suryasticsai/steerradar/main/steeradar-logo.png" alt="SteerRadar" class="brand-logo"
-                onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-            <span class="brand-fallback" style="display:none;"><i class="fas fa-satellite-dish"></i> SteerRadar</span>
-        </div>
-        <div class="header-actions">
-            <button id="admin-panel-btn" class="hidden btn btn-secondary btn-sm" onclick="openModal('admin-modal')">
-                <i class="fas fa-shield-alt"></i> Admin
-            </button>
-            <i class="fas fa-bell text-sub icon-btn"></i>
-            <img src="https://i.pravatar.cc/150?img=11" alt="Profile" class="user-avatar" id="header-avatar" onclick="switchTab('profile')">
-        </div>
-    </header>
-
-    <!-- ================= MAIN VIEWS ================= -->
-    <main>
-
-        <!-- 1. LANES -->
-        <section id="view-lanes" class="view-section active">
-            <div class="section-header flex justify-between align-center">
-                <div>
-                    <h2 class="section-title">Live Drivers</h2>
-                    <p class="text-sub">Real-time community updates</p>
-                </div>
-                <button class="btn btn-secondary btn-sm"><i class="fas fa-filter"></i> All Lanes</button>
-            </div>
-        </section>
-
-        <!-- 2. HIVE -->
-        <section id="view-hive" class="view-section">
-            <div class="hive-header">
-                <h2 class="hive-title">Hive</h2>
-                <p class="text-sub">Your community. All aboard.</p>
-            </div>
-
-            <div class="stories-container">
-                <div class="story-item">
-                    <div class="story-avatar story-add"><i class="fas fa-plus"></i></div>
-                    <span class="story-name">Your story</span>
-                </div>
-                <div class="story-item">
-                    <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=5" alt="Ananya"></div>
-                    <span class="story-name">Ananya</span>
-                </div>
-                <div class="story-item">
-                    <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=8" alt="Rohit"></div>
-                    <span class="story-name">Rohit</span>
-                </div>
-                <div class="story-item">
-                    <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=9" alt="Meera"></div>
-                    <span class="story-name">Meera</span>
-                </div>
-                <div class="story-item">
-                    <div class="story-avatar"><img src="https://i.pravatar.cc/150?img=15" alt="Arjun"></div>
-                    <span class="story-name">Arjun</span>
-                </div>
-            </div>
-
-            <div class="post-card greeting-card">
-                <div class="flex justify-between align-center">
-                    <div>
-                        <h3 class="greeting-title" id="hive-greeting">Good evening, Rider 👋</h3>
-                        <p class="text-sub mt-1">Here's what's happening in your community.</p>
-                        <span class="tag tag-live mt-2">Hyderabad</span>
-                    </div>
-                    <i class="fas fa-bus greeting-icon"></i>
-                </div>
-            </div>
-
-            <button class="btn btn-secondary w-full mb-3" onclick="openNeighborhoodChat()" style="border-color: var(--primary); justify-content: flex-start; padding: 14px 18px;">
-                <i class="fas fa-map-marked-alt" style="color: var(--primary); font-size: 18px;"></i>
-                <div style="text-align: left; flex: 1; margin-left: 12px;">
-                    <div style="font-weight: 700; font-size: 14px;">Neighborhood Chat</div>
-                    <div style="font-size: 11px; color: var(--text-sub); font-weight: 400;">Talk to riders near you</div>
-                </div>
-                <i class="fas fa-chevron-right" style="color: var(--text-muted); font-size: 12px;"></i>
-            </button>
-
-            <h3 class="section-subtitle">Local posts</h3>
-        </section>
-
-        <!-- 3. MAP -->
-        <section id="view-map" class="view-section">
-            <div id="map-container">
-                <div id="map"></div>
-
-                <!-- TOP-LEFT: SEARCH BAR -->
-                <div class="map-search-bar">
-                    <i class="fas fa-search"></i>
-                    <input type="text" id="map-search-input" placeholder="Search places, area, landmark..." autocomplete="off">
-                    <button id="map-search-clear" class="map-search-clear hidden" onclick="mapModule.clearSearch()">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-
-                <!-- TOP-LEFT: FILTER CHIPS -->
-                <div class="map-chips">
-                    <button class="map-chip active" onclick="setMapFilter('live', this)">⚡ Live now</button>
-                    <button class="map-chip" onclick="setMapFilter('all', this)">All</button>
-                    <button class="map-chip" onclick="setMapFilter('seats', this)">Has seats</button>
-                    <button class="map-chip" onclick="setMapFilter('mine', this)">My lanes</button>
-                </div>
-
-                <!-- SEARCH RESULTS DROPDOWN -->
-                <div id="map-search-results" class="map-search-results hidden"></div>
-
-                <!-- ⭐ NEW: MAP CONTROL BAR (top-right stack) -->
-                <div class="map-top-right">
-                    <button class="map-ctrl-btn" onclick="mapModule.refreshSize()" title="Refresh map">
-                        <i class="fas fa-rotate"></i>
-                    </button>
-                    <button class="map-ctrl-btn" onclick="recenterMap()" title="Recenter on me">
-                        <i class="fas fa-crosshairs"></i>
-                    </button>
-                    <button class="map-ctrl-btn" id="btn-enable-gps" onclick="enableGPS()" title="Enable GPS">
-                        <i class="fas fa-location-dot"></i>
-                    </button>
-                </div>
-
-                <!-- MID-LEFT: GHOST MODE (SteerAgent only) -->
-                <div class="map-mid-left">
-                    <button id="ctrl-ghost" class="map-ctrl-btn hidden" onclick="toggleGhostMode()" title="Ghost mode">
-                        <i class="fas fa-ghost"></i>
-                    </button>
-                </div>
-
-                <!-- BOTTOM-LEFT: TRIP BUTTON (SteerAgent only) -->
-                <div class="map-bottom-left">
-                    <button id="ctrl-trip" class="map-ctrl-btn map-ctrl-primary hidden" onclick="toggleTrip()" title="Start/End Trip">
-                        <i class="fas fa-play"></i>
-                    </button>
-                </div>
-
-                <!-- BOTTOM-RIGHT: ZOOM + REPORT -->
-                <div class="map-bottom-right">
-                    <button class="map-ctrl-btn" onclick="mapModule.zoomIn()" title="Zoom in">
-                        <i class="fas fa-plus"></i>
-                    </button>
-                    <button class="map-ctrl-btn" onclick="mapModule.zoomOut()" title="Zoom out">
-                        <i class="fas fa-minus"></i>
-                    </button>
-                    <button id="ctrl-alert" class="map-ctrl-btn map-ctrl-warning hidden" onclick="openModal('report-modal')" title="Report road">
-                        <i class="fas fa-exclamation-triangle"></i>
-                    </button>
-                </div>
-
-                <!-- TRIP BANNER -->
-                <div id="map-trip-banner" class="map-trip-banner hidden">
-                    <div class="trip-banner-info">
-                        <div class="trip-banner-title" id="trip-banner-title">Heading to pickup</div>
-                        <div class="trip-banner-sub" id="trip-banner-sub">-- km away</div>
-                    </div>
-                    <button class="btn btn-danger btn-sm" onclick="mapModule.cancelRoute()"><i class="fas fa-times"></i></button>
-                </div>
-            </div>
-        </section>
-
-        <!-- 4. PROFILE -->
-        <section id="view-profile" class="view-section">
-            <div class="profile-header">
-                <img src="https://i.pravatar.cc/150?img=11" class="profile-avatar" id="profile-avatar-img">
-                <h2 id="profile-name-display" class="profile-name">Loading...</h2>
-                <p id="profile-role-display" class="profile-role">RearAgent</p>
-                <button class="btn btn-secondary btn-sm mt-2" onclick="openEditProfile()"><i class="fas fa-edit"></i> Edit Profile</button>
-            </div>
-
-            <div id="become-steer-agent-section" class="post-card upgrade-card hidden">
-                <h3 class="upgrade-title">Become a SteerAgent</h3>
-                <p class="text-sub mb-3">Verify your documents to unlock driving features, post lanes, and accept payments.</p>
-                <button class="btn btn-primary w-full" onclick="openModal('steer-agent-modal')">Apply Now</button>
-            </div>
-
-            <div id="steer-agent-pending-section" class="post-card pending-card hidden">
-                <h3 class="pending-title">Application Under Review</h3>
-                <p class="text-sub">Your documents are being validated by an Admin. Check your email for updates.</p>
-            </div>
-
-            <!-- APPEARANCE -->
-            <div class="post-card">
-                <h3 class="section-subtitle">Appearance</h3>
-
-                <div class="setting-row">
-                    <div>
-                        <span style="font-weight:600;">UI Theme</span>
-                        <p class="text-sub" style="font-size:11px; margin-top:2px;">Light or dark</p>
-                    </div>
-                    <label class="theme-switch">
-                        <input type="checkbox" id="toggle-theme" onchange="handleThemeToggle(this)">
-                        <span class="theme-slider">
-                            <i class="fas fa-sun theme-icon-light"></i>
-                            <i class="fas fa-moon theme-icon-dark"></i>
-                        </span>
-                    </label>
-                </div>
-
-                <div style="margin-top:16px;">
-                    <span style="font-weight:600; font-size:14px;">Map Style</span>
-                    <p class="text-sub" style="font-size:11px; margin-top:2px; margin-bottom:8px;">Choose how the map looks</p>
-                    <select id="map-theme-select" class="form-input" onchange="handleMapThemeChange(this.value)">
-                        <option value="bright">☀️ Bright (Standard)</option>
-                        <option value="dark">🌙 Dark</option>
-                        <option value="satellite">🛰️ Satellite</option>
-                        <option value="terrain">⛰️ Terrain</option>
-                    </select>
-                </div>
-            </div>
-
-            <!-- PREFERENCES -->
-            <div class="post-card">
-                <h3 class="section-subtitle">Preferences</h3>
-                <div class="setting-row">
-                    <span>Ghost mode (hide from map)</span>
-                    <input type="checkbox" id="toggle-ghost-mode" class="toggle-switch">
-                </div>
-                <div class="setting-row">
-                    <span>Show my plate to other drivers</span>
-                    <input type="checkbox" id="toggle-show-plate" class="toggle-switch" checked>
-                </div>
-                <div class="setting-row">
-                    <span>Share UPI QR for payments</span>
-                    <input type="checkbox" id="toggle-share-upi" class="toggle-switch" checked>
-                </div>
-            </div>
-
-            <button class="btn btn-secondary w-full mt-3" onclick="openModal('trips-modal')"><i class="fas fa-route"></i> My Trips</button>
-            <button class="btn btn-secondary w-full mt-3" onclick="openModal('log-modal')"><i class="fas fa-bug"></i> View Debug Log</button>
-            <button class="btn btn-secondary w-full mt-4" onclick="handleLogout()">Log Out</button>
-        </section>
-    </main>
-
-    <!-- ================= BOTTOM NAV ================= -->
-    <nav id="bottom-nav">
-        <button onclick="switchTab('lanes')" class="active" id="nav-lanes"><i class="fas fa-bus"></i> Lanes</button>
-        <button onclick="switchTab('hive')" id="nav-hive"><i class="fas fa-comments"></i> Hive</button>
-        <button id="fab-create" class="fab" onclick="handleFABClick()"><i class="fas fa-plus"></i></button>
-        <button onclick="switchTab('map')" id="nav-map"><i class="fas fa-map"></i> Map</button>
-        <button onclick="switchTab('profile')" id="nav-profile"><i class="fas fa-user"></i> Profile</button>
-    </nav>
-
-    <!-- ================= CHAT OVERLAY ================= -->
-    <div id="hive-chat-view" class="hidden">
-        <header class="chat-header">
-            <button onclick="closeChat()" class="icon-btn"><i class="fas fa-arrow-left"></i></button>
-            <img id="chat-header-avatar" src="https://i.pravatar.cc/150?img=12" alt="Avatar" class="user-avatar" style="width: 32px; height: 32px; margin-right: 8px;">
-            <h3 id="chat-room-title" class="chat-title">Hive Chat</h3>
-        </header>
-        <div id="chat-messages-container" class="chat-container"></div>
-        <div class="chat-input-area">
-            <button id="request-payment-btn" class="btn-primary btn-circle btn-sm" title="Request payment" style="font-size:18px; font-weight:800;">₹</button>
-            <input type="text" id="chat-input" placeholder="Type a message..." class="chat-input">
-            <button onclick="sendMessage()" class="btn-primary btn-circle btn-sm"><i class="fas fa-paper-plane"></i></button>
-        </div>
-    </div>
+<div class="controls">
+  <select id="category">
+    <option value="all">All nearby places</option>
+    <option value="bus">Bus stops and bus stations</option>
+    <option value="metro">Metro and subway stations</option>
+    <option value="train">Railway stations</option>
+    <option value="public">Public places and services</option>
+  </select>
+  <button id="find">Find Nearby</button>
 </div>
 
-<!-- ================= BOTTOM SHEET (map marker details) ================= -->
-<div id="map-bottom-sheet" class="bottom-sheet-overlay hidden" onclick="closeBottomSheet(event)">
-    <div class="bottom-sheet" onclick="event.stopPropagation()">
-        <div class="bottom-sheet-handle" onclick="closeBottomSheet()"></div>
-        <div id="bottom-sheet-content" class="bottom-sheet-content"></div>
-    </div>
+<div id="status" role="status">
+  Tap Find Nearby and allow location access.
 </div>
 
-<!-- ⭐ NEW: QUICK PIN SHEET (opens on long-press of map) -->
-<div id="quick-pin-sheet" class="bottom-sheet-overlay hidden" onclick="closeQuickPinSheet(event)">
-    <div class="bottom-sheet" onclick="event.stopPropagation()">
-        <div class="bottom-sheet-handle" onclick="closeQuickPinSheet()"></div>
+<div id="results"></div>
 
-        <div class="flex justify-between align-center mb-3">
-            <div>
-                <h3 style="font-weight:800; font-size:16px;">Drop a pin here</h3>
-                <p class="text-sub text-xs" id="qp-coords">—</p>
-            </div>
-            <button onclick="closeQuickPinSheet()" class="icon-btn"><i class="fas fa-times"></i></button>
-        </div>
-
-        <div class="grid-2-col" style="margin-bottom:12px;">
-            <button class="btn btn-secondary" onclick="quickPinAction('lane')">
-                <i class="fas fa-route"></i> Create Lane
-            </button>
-            <button class="btn btn-secondary" onclick="quickPinAction('service')">
-                <i class="fas fa-tools"></i> Add Service
-            </button>
-            <button class="btn btn-secondary" onclick="quickPinAction('save')">
-                <i class="fas fa-bookmark"></i> Save Pin
-            </button>
-            <button class="btn btn-secondary" onclick="quickPinAction('navigate')">
-                <i class="fas fa-diamond-turn-right"></i> Navigate
-            </button>
-        </div>
-
-        <button class="btn btn-primary w-full" onclick="quickPinAction('alert')">
-            <i class="fas fa-triangle-exclamation"></i> Report Road Issue
-        </button>
-    </div>
-</div>
-
-<!-- ================= MODALS ================= -->
-
-<!-- 1. Auth -->
-<div id="auth-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <div class="auth-tabs">
-            <button id="tab-signin" class="auth-tab active" onclick="switchAuthTab('signin')">Sign In</button>
-            <button id="tab-signup" class="auth-tab" onclick="switchAuthTab('signup')">Create Account</button>
-            <button onclick="closeModal('auth-modal')" class="close-btn ml-auto">&times;</button>
-        </div>
-        <form id="signin-form">
-            <div class="form-group"><label>Phone or Email</label><input type="text" id="signin-identity" class="form-input" required placeholder="9876543210 or you@example.com"></div>
-            <div class="form-group"><label>Password</label><input type="password" id="signin-password" class="form-input" required placeholder="Enter password"></div>
-            <button type="submit" class="btn btn-primary w-full">Sign In</button>
-        </form>
-        <form id="signup-form" class="hidden">
-            <div class="form-group"><label>Full Name</label><input type="text" id="signup-name" class="form-input" required placeholder="Sai Kumar"></div>
-            <div class="form-group"><label>Phone Number</label><input type="tel" id="signup-phone" class="form-input" required placeholder="9876543210"></div>
-            <div class="form-group"><label>Email Address</label><input type="email" id="signup-email" class="form-input" required placeholder="sai@example.com"></div>
-            <div class="form-group"><label>Password</label><input type="password" id="signup-password" class="form-input" required placeholder="Create a strong password"></div>
-            <div class="form-group"><label>Confirm Password</label><input type="password" id="signup-confirm-password" class="form-input" required placeholder="Re-enter password"></div>
-            <button type="submit" class="btn btn-primary w-full" id="signup-submit-btn">Send OTP</button>
-            <p class="terms-text">By signing up, you agree to our Terms of Service.</p>
-        </form>
-    </div>
-</div>
-
-<!-- 2. OTP -->
-<div id="otp-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <div class="modal-header"><h2 class="modal-title">Verify Email</h2><button onclick="closeModal('otp-modal')" class="close-btn">&times;</button></div>
-        <p class="text-sub mb-3" id="otp-message">Enter the 6-digit code sent to your email.</p>
-        <div class="form-group"><label>OTP Code</label><input type="text" id="otp-code" class="form-input" maxlength="6" placeholder="000000" style="text-align:center; font-size:22px; letter-spacing:6px;"></div>
-        <button class="btn btn-primary w-full" onclick="verifyOTP()">Verify & Create Account</button>
-    </div>
-</div>
-
-<!-- 3. SteerAgent Application -->
-<div id="steer-agent-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <div class="modal-header"><h2 class="modal-title">SteerAgent Application</h2><button onclick="closeModal('steer-agent-modal')" class="close-btn">&times;</button></div>
-        <form id="steer-agent-form">
-            <div class="form-group"><label>Vehicle Number</label><input type="text" id="sa-vehicle-number" class="form-input" required placeholder="KA01AB1234"></div>
-            <div class="form-group"><label>Vehicle Type</label><select id="sa-vehicle-type" class="form-input" required>
-                <option value="">Select...</option><option value="two-wheeler">Bike</option><option value="car">Car</option><option value="auto">Auto</option><option value="bus">Bus</option>
-            </select></div>
-            <div class="form-group"><label>UPI ID (For Payments)</label><input type="text" id="sa-upi-id" class="form-input" required placeholder="yourname@upi"></div>
-            <div class="form-group"><label>Driver's License Photo</label><input type="file" id="sa-license" class="form-input" accept="image/*" required></div>
-            <div class="form-group"><label>Vehicle RC Photo</label><input type="file" id="sa-rc" class="form-input" accept="image/*" required></div>
-            <div class="form-group"><label>Selfie with Vehicle</label><input type="file" id="sa-selfie" class="form-input" accept="image/*" required></div>
-            <div class="agreement-box"><strong>SteerAgent Agreement</strong><p>By checking this box, I confirm that all documents uploaded are authentic and belong to me. I agree to follow all traffic rules, maintain my vehicle responsibly, and treat all RearAgents with respect. I understand that any violation may lead to immediate termination of my SteerAgent account.</p></div>
-            <div class="flex align-center mt-2"><input type="checkbox" id="sa-agreement" required class="toggle-switch"><label for="sa-agreement" class="ml-2 text-sm">I agree to the SteerAgent Agreement.</label></div>
-            <button type="submit" class="btn btn-primary w-full mt-4">Submit Application</button>
-        </form>
-    </div>
-</div>
-
-<!-- 4. Create Lane (with departure time + ⭐ live countdown preview) -->
-<div id="create-lane-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <div class="modal-header"><h2 class="modal-title">Create a Lane</h2><button onclick="closeModal('create-lane-modal')" class="close-btn">&times;</button></div>
-        <form id="create-lane-form">
-            <div class="form-group"><label>Route Title</label><input type="text" id="lane-title" class="form-input" required placeholder="e.g., Hitech City to Gachibowli"></div>
-            <div class="form-group"><label>Description / Stops</label><textarea id="lane-description" class="form-input" rows="2" placeholder="e.g., Via Madhapur, Kondapur"></textarea></div>
-            <div class="form-group"><label>Total Seats</label><input type="number" id="lane-seats" class="form-input" required min="1" max="50" value="4"></div>
-            <div class="form-group"><label>Vehicle Type</label><select id="lane-vehicle-type" class="form-input" required>
-                <option value="car">Car</option><option value="bike">Bike</option><option value="auto">Auto</option><option value="bus">Bus</option>
-            </select></div>
-            <div class="form-group"><label>Departure Time</label><input type="time" id="lane-start-time" class="form-input" required></div>
-
-            <!-- ⭐ NEW: live countdown preview -->
-            <div id="lane-countdown-preview" class="qp-countdown hidden">
-                <div class="qp-countdown-label">Departs in</div>
-                <div class="qp-countdown-value" id="lane-countdown-value">--:--</div>
-                <div class="qp-countdown-hint" id="lane-countdown-hint">Set a departure time</div>
-            </div>
-
-            <div class="form-group"><label>Vehicle Photo (Optional)</label><input type="file" id="lane-photo" class="form-input" accept="image/*"></div>
-            <button type="submit" class="btn btn-primary w-full mt-4">Post Lane</button>
-        </form>
-    </div>
-</div>
-
-<!-- 5. Create Hive Post -->
-<div id="create-hive-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <div class="modal-header"><h2 class="modal-title">Create a Post</h2><button onclick="closeModal('create-hive-modal')" class="close-btn">&times;</button></div>
-        <form id="create-hive-form">
-            <div class="form-group"><label>Title (optional)</label><input type="text" id="hive-title" class="form-input" maxlength="80" placeholder="Short headline..."></div>
-            <div class="form-group"><label>What's happening?</label><textarea id="hive-text" class="form-input" rows="3" placeholder="Share an update with the community..."></textarea></div>
-            <div class="form-group">
-                <label>Attach Media</label>
-                <div style="display:flex; gap:10px; margin-bottom:10px;">
-                    <label class="btn btn-secondary btn-sm" style="flex:1; text-align:center;">
-                        <i class="fas fa-image"></i> Photo <input type="file" id="hive-photo" accept="image/*" style="display:none;" onchange="document.getElementById('hive-embed-url').value=''">
-                    </label>
-                </div>
-                <input type="url" id="hive-embed-url" class="form-input" placeholder="Or paste YouTube/Instagram link here..." oninput="document.getElementById('hive-photo').value=''">
-                <div id="hive-photo-preview" style="margin-top:10px;"></div>
-            </div>
-            <div class="form-group"><label>Tags (comma separated, max 5)</label><input type="text" id="hive-tags" class="form-input" placeholder="hyderabad, dailycommute, carpool"></div>
-            <button type="submit" class="btn btn-primary w-full mt-4">Post to Hive</button>
-        </form>
-    </div>
-</div>
-
-<!-- 6. Edit Profile -->
-<div id="edit-profile-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <div class="modal-header"><h2 class="modal-title">Edit Profile</h2><button onclick="closeModal('edit-profile-modal')" class="close-btn">&times;</button></div>
-        <form id="edit-profile-form">
-            <div class="form-group"><label>Full Name</label><input type="text" id="edit-name" class="form-input" required></div>
-            <div class="form-group"><label>UPI ID (For Payments)</label><input type="text" id="edit-upi" class="form-input" placeholder="yourname@upi"></div>
-            <div class="form-group"><label>Profile Photo</label><input type="file" id="edit-avatar" class="form-input" accept="image/*"></div>
-            <button type="submit" class="btn btn-primary w-full mt-4">Save Changes</button>
-        </form>
-    </div>
-</div>
-
-<!-- 7. Trips -->
-<div id="trips-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <div class="modal-header"><h2 class="modal-title">My Trips</h2><button onclick="closeModal('trips-modal')" class="close-btn">&times;</button></div>
-        <div id="trips-list"><div class="text-center text-sub text-sm" style="padding:20px;"><div class="spinner"></div></div></div>
-    </div>
-</div>
-
-<!-- 8. Admin Panel -->
-<div id="admin-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <div class="modal-header"><h2 class="modal-title">Admin Panel</h2><button onclick="closeModal('admin-modal')" class="close-btn">&times;</button></div>
-        <h3 class="section-subtitle">Pending SteerAgent Applications</h3>
-        <div id="admin-application-list" class="mt-2"><p class="text-sub text-sm">No pending applications.</p></div>
-    </div>
-</div>
-
-<!-- 9. Report Road -->
-<div id="report-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <div class="modal-header"><h2 class="modal-title">Report Road Condition</h2><button onclick="closeModal('report-modal')" class="close-btn">&times;</button></div>
-        <p class="text-sub mb-3">Drop a quick alert on the map for other drivers.</p>
-        <div class="grid-2-col">
-            <button class="btn btn-secondary" onclick="reportAlert('traffic')">🚧 Traffic</button>
-            <button class="btn btn-secondary" onclick="reportAlert('pothole')">🕳️ Pothole</button>
-            <button class="btn btn-secondary" onclick="reportAlert('police')">🚓 Police</button>
-            <button class="btn btn-secondary" onclick="reportAlert('accident')">⚠️ Accident</button>
-        </div>
-    </div>
-</div>
-
-<!-- 10. Save Location -->
-<div id="location-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <div class="modal-header"><h2 class="modal-title">Save Location</h2><button onclick="closeModal('location-modal')" class="close-btn">&times;</button></div>
-        <div class="form-group"><label>Location Name</label><input type="text" id="location-name" class="form-input" placeholder="e.g., Good Parking Spot"></div>
-        <button class="btn btn-primary w-full" onclick="confirmSaveLocation()">Save to My Profile</button>
-    </div>
-</div>
-
-<!-- 11. Debug Log -->
-<div id="log-modal" class="modal-overlay hidden">
-    <div class="modal-content log-modal-content">
-        <div class="modal-header"><h2 class="modal-title"><i class="fas fa-bug"></i> Debug Log</h2><button onclick="closeModal('log-modal')" class="close-btn">&times;</button></div>
-        <p class="text-sub text-xs mb-2">Long-press the logo anytime to open this.</p>
-        <div id="logContent" class="log-content"><div class="log-empty">No logs yet.</div></div>
-        <div class="log-actions">
-            <button class="btn btn-secondary btn-sm" onclick="logger.export()"><i class="fas fa-copy"></i> Copy</button>
-            <button class="btn btn-danger btn-sm" onclick="logger.clear()"><i class="fas fa-trash"></i> Clear</button>
-        </div>
-    </div>
-</div>
-
-<!-- 12. Agent Profile Modal -->
-<div id="agent-profile-modal" class="modal-overlay hidden">
-    <div class="modal-content" style="max-height: 92vh; overflow-y: auto;">
-        <div class="modal-header">
-            <h2 class="modal-title">SteerAgent Profile</h2>
-            <button onclick="closeModal('agent-profile-modal')" class="close-btn">&times;</button>
-        </div>
-
-        <div class="flex flex-col items-center mb-4">
-            <img id="agent-profile-avatar" src="https://i.pravatar.cc/150?img=12" alt="Agent" class="profile-avatar" style="width: 80px; height: 80px; border-width: 3px;">
-            <h3 id="agent-profile-name" class="profile-name mt-2">Agent Name</h3>
-            <div class="flex gap-2 mt-1">
-                <span class="tag tag-live" id="agent-profile-rating">⭐ 4.8 (120 Rides)</span>
-                <span class="tag tag-live" style="background: var(--primary); color: #fff;"><i class="fas fa-shield-alt"></i> Verified</span>
-            </div>
-        </div>
-
-        <div class="post-card mb-3">
-            <h3 class="section-subtitle mb-2"><i class="fas fa-car"></i> Vehicle Details</h3>
-            <div class="grid-2-col text-sm">
-                <div><span class="text-sub">Model</span><br><strong id="agent-vehicle-model">—</strong></div>
-                <div><span class="text-sub">Color</span><br><strong id="agent-vehicle-color">—</strong></div>
-                <div class="col-span-2 mt-2"><span class="text-sub">License Plate</span><br><strong id="agent-vehicle-plate" style="letter-spacing: 1px;">N/A</strong></div>
-            </div>
-        </div>
-
-        <div class="mb-4">
-            <h3 class="section-subtitle mb-2">Vehicle & Verification Images</h3>
-            <p class="text-sub text-xs mb-2">Images uploaded by the agent during application.</p>
-            <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar" id="agent-images-gallery"></div>
-        </div>
-
-        <button class="btn btn-primary w-full" onclick="closeModal('agent-profile-modal'); openChatFromAgentProfile();">
-            <i class="fas fa-comment"></i> Message Agent
-        </button>
-    </div>
-</div>
-
-<!-- 13. Negotiation Modal -->
-<div id="negotiation-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2 class="modal-title">Negotiate Fare</h2>
-            <button onclick="closeModal('negotiation-modal')" class="close-btn">&times;</button>
-        </div>
-
-        <div class="text-center mb-4">
-            <p class="text-sub text-sm mb-1">Standard Fare</p>
-            <p class="text-2xl font-bold text-darker line-through" id="neg-standard-fare">₹20</p>
-        </div>
-
-        <div class="flex items-center justify-center gap-4 mb-6">
-            <button onclick="updateOffer(-1)" class="btn btn-secondary btn-circle" style="width: 52px; height: 52px; font-size: 22px;">-</button>
-            <div class="text-center">
-                <p class="text-sub text-xs mb-1">Your Offer</p>
-                <p class="text-3xl font-bold" style="color: var(--primary);" id="neg-offer-display">₹18</p>
-            </div>
-            <button onclick="updateOffer(1)" class="btn btn-secondary btn-circle" style="width: 52px; height: 52px; font-size: 22px;">+</button>
-        </div>
-
-        <button class="btn btn-primary w-full" onclick="sendOffer()">Send Offer to Agent</button>
-    </div>
-</div>
-
-<!-- 14. POST DETAIL -->
-<div id="post-detail-modal" class="modal-overlay hidden">
-    <div class="modal-content" style="max-height: 92vh; overflow-y: auto;">
-        <div class="modal-header">
-            <h2 class="modal-title">Post</h2>
-            <button onclick="closeModal('post-detail-modal')" class="close-btn">&times;</button>
-        </div>
-        <div id="post-detail-content"></div>
-        <div id="post-detail-comments" style="margin-top:16px;"></div>
-    </div>
-</div>
-
-<!-- 15. COMMENT MODAL -->
-<div id="comment-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2 class="modal-title">Add Comment</h2>
-            <button onclick="closeModal('comment-modal')" class="close-btn">&times;</button>
-        </div>
-        <input type="hidden" id="comment-post-id" value="">
-        <div class="form-group">
-            <textarea id="comment-text" class="form-input" rows="3" maxlength="800" placeholder="Write a comment..." style="resize: vertical;"></textarea>
-        </div>
-        <button class="btn btn-primary w-full mt-2" id="comment-submit-btn">
-            <i class="fas fa-paper-plane"></i> Post Comment
-        </button>
-    </div>
-</div>
-
-<!-- 16. SHARE MODAL -->
-<div id="share-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2 class="modal-title">Share Post</h2>
-            <button onclick="closeModal('share-modal')" class="close-btn">&times;</button>
-        </div>
-        <input type="hidden" id="share-post-id" value="">
-        <input type="hidden" id="share-post-url" value="">
-
-        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; margin-bottom:20px;">
-            <button class="btn btn-secondary" style="flex-direction:column; padding:14px 8px; gap:6px; height:auto;" onclick="shareTo('whatsapp')">
-                <i class="fab fa-whatsapp" style="font-size:22px; color:#25D366;"></i>
-                <span style="font-size:11px;">WhatsApp</span>
-            </button>
-            <button class="btn btn-secondary" style="flex-direction:column; padding:14px 8px; gap:6px; height:auto;" onclick="shareTo('twitter')">
-                <i class="fab fa-twitter" style="font-size:22px; color:#1DA1F2;"></i>
-                <span style="font-size:11px;">Twitter</span>
-            </button>
-            <button class="btn btn-secondary" style="flex-direction:column; padding:14px 8px; gap:6px; height:auto;" onclick="shareTo('telegram')">
-                <i class="fab fa-telegram" style="font-size:22px; color:#0088cc;"></i>
-                <span style="font-size:11px;">Telegram</span>
-            </button>
-            <button class="btn btn-secondary" style="flex-direction:column; padding:14px 8px; gap:6px; height:auto;" onclick="shareTo('facebook')">
-                <i class="fab fa-facebook" style="font-size:22px; color:#1877F2;"></i>
-                <span style="font-size:11px;">Facebook</span>
-            </button>
-            <button class="btn btn-secondary" style="flex-direction:column; padding:14px 8px; gap:6px; height:auto;" onclick="shareTo('instagram')">
-                <i class="fab fa-instagram" style="font-size:22px; color:#E4405F;"></i>
-                <span style="font-size:11px;">Instagram</span>
-            </button>
-            <button class="btn btn-secondary" style="flex-direction:column; padding:14px 8px; gap:6px; height:auto;" onclick="shareTo('linkedin')">
-                <i class="fab fa-linkedin" style="font-size:22px; color:#0A66C2;"></i>
-                <span style="font-size:11px;">LinkedIn</span>
-            </button>
-            <button class="btn btn-secondary" style="flex-direction:column; padding:14px 8px; gap:6px; height:auto;" onclick="shareTo('native')">
-                <i class="fas fa-share-nodes" style="font-size:22px; color:var(--primary);"></i>
-                <span style="font-size:11px;">More</span>
-            </button>
-            <button class="btn btn-secondary" style="flex-direction:column; padding:14px 8px; gap:6px; height:auto;" onclick="shareTo('copy')">
-                <i class="fas fa-link" style="font-size:22px; color:var(--text-sub);"></i>
-                <span style="font-size:11px;">Copy link</span>
-            </button>
-        </div>
-
-        <div class="form-group">
-            <label>Post link</label>
-            <div style="display:flex; gap:8px;">
-                <input type="text" id="share-url-display" class="form-input" readonly style="flex:1;">
-                <button class="btn btn-secondary" onclick="shareTo('copy')"><i class="fas fa-copy"></i></button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- 17. USER PROFILE MODAL (opens when any avatar is clicked) -->
-<div id="user-profile-modal" class="modal-overlay hidden">
-    <div class="modal-content" style="max-height: 92vh; overflow-y: auto;">
-        <div class="modal-header">
-            <h2 class="modal-title">Profile</h2>
-            <button onclick="closeModal('user-profile-modal')" class="close-btn">&times;</button>
-        </div>
-        <div id="user-profile-content">
-            <div class="flex flex-col items-center">
-                <img id="user-profile-avatar" src="https://i.pravatar.cc/150?img=12" alt="User" class="profile-avatar" style="width: 80px; height: 80px;">
-                <h3 id="user-profile-name" class="profile-name mt-2">User</h3>
-                <span class="tag tag-live mt-1" id="user-profile-role">RearAgent</span>
-            </div>
-            <div class="post-card mt-3">
-                <div class="grid-2-col text-sm">
-                    <div><span class="text-sub">Vehicle</span><br><strong id="user-profile-vehicle">—</strong></div>
-                    <div><span class="text-sub">Type</span><br><strong id="user-profile-vehicle-type">—</strong></div>
-                    <div class="col-span-2 mt-2"><span class="text-sub">Community</span><br><strong id="user-profile-community">—</strong></div>
-                    <div class="col-span-2 mt-2"><span class="text-sub">Rating</span><br><strong id="user-profile-rating">—</strong></div>
-                </div>
-            </div>
-            <button class="btn btn-primary w-full mt-3" onclick="messageUserFromProfile()">
-                <i class="fas fa-comment"></i> Message
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- ================= SCRIPTS ================= -->
-<script src="config.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script type="module" src="js/app.js"></script>
-<script type="module" src="js/features.js"></script>
 
 <script>
-    // Unregister old service workers
-    (function() {
-        if (!('serviceWorker' in navigator)) return;
-        navigator.serviceWorker.getRegistrations().then(function(regs) {
-            for (let reg of regs) reg.unregister();
+// ========= MAP SETUP =========
+
+const map = L.map("map").setView([17.385, 78.4867], 12);
+
+L.tileLayer(
+  "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+  {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors"
+  }
+).addTo(map);
+
+const markers = L.layerGroup().addTo(map);
+const statusEl = document.getElementById("status");
+const resultsEl = document.getElementById("results");
+const findBtn = document.getElementById("find");
+const categoryEl = document.getElementById("category");
+
+let currentPosition = null;
+let currentPlaces = [];
+
+const RADIUS = 3000;
+const STORAGE_KEY = "steerradar_place_preferences";
+
+// ========= DISTANCE =========
+
+function distanceMetres(a, b, c, d) {
+  const R = 6371000;
+  const rad = Math.PI / 180;
+  const x = (c - a) * rad;
+  const y = (d - b) * rad;
+
+  const h =
+    Math.sin(x / 2) ** 2 +
+    Math.cos(a * rad) *
+    Math.cos(c * rad) *
+    Math.sin(y / 2) ** 2;
+
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// ========= LOCAL PREFERENCE LEARNING =========
+
+function getPreferences() {
+  try {
+    return JSON.parse(
+      localStorage.getItem(STORAGE_KEY) || "{}"
+    );
+  } catch {
+    return {};
+  }
+}
+
+function rememberChoice(type) {
+  const prefs = getPreferences();
+  prefs[type] = (prefs[type] || 0) + 1;
+
+  localStorage.setItem(
+    STORAGE_KEY, JSON.stringify(prefs)
+  );
+}
+
+// ========= CATEGORY CLASSIFICATION =========
+
+function classify(tags) {
+  if (
+    tags.railway === "subway_entrance" ||
+    tags.station === "subway" ||
+    tags.subway === "yes"
+  ) return "metro";
+
+  if (
+    tags.railway === "station" ||
+    tags.railway === "halt"
+  ) return "train";
+
+  if (
+    tags.highway === "bus_stop" ||
+    tags.amenity === "bus_station" ||
+    tags.bus === "yes"
+  ) return "bus";
+
+  return "public";
+}
+
+function iconFor(type) {
+  return {
+    bus: "🚌",
+    metro: "🚇",
+    train: "🚆",
+    public: "📍"
+  }[type] || "📍";
+}
+
+// ========= SIMPLE KNN RECOMMENDATIONS =========
+// Nearest neighbours by geographical distance.
+// Preferences influence recommendations among
+// similarly located places.
+
+function rankPlaces(places) {
+  const prefs = getPreferences();
+  const maxPref = Math.max(
+    1, ...Object.values(prefs)
+  );
+
+  return [...places].map(place => {
+    const proximity =
+      1 / (1 + place.distance / 500);
+
+    const preference =
+      (prefs[place.type] || 0) / maxPref;
+
+    return {
+      ...place,
+      score: proximity * 0.85 +
+             preference * 0.15
+    };
+  }).sort((a, b) => b.score - a.score);
+}
+
+// ========= OPENSTREETMAP QUERY =========
+
+function buildQuery(lat, lon) {
+  return `
+[out:json][timeout:30];
+(
+  nwr["highway"="bus_stop"]
+    (around:${RADIUS},${lat},${lon});
+
+  nwr["amenity"="bus_station"]
+    (around:${RADIUS},${lat},${lon});
+
+  nwr["railway"~"station|halt|subway_entrance"]
+    (around:${RADIUS},${lat},${lon});
+
+  nwr["station"="subway"]
+    (around:${RADIUS},${lat},${lon});
+
+  nwr["amenity"~"hospital|clinic|library|community_centre|police"]
+    (around:${RADIUS},${lat},${lon});
+
+  nwr["leisure"="park"]
+    (around:${RADIUS},${lat},${lon});
+);
+out center;
+`;
+}
+
+async function fetchPlaces(lat, lon) {
+  const query = buildQuery(lat, lon);
+
+  const endpoints = [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass-api.de/api/interpreter"
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(
+        () => controller.abort(), 35000
+      );
+
+      let response;
+      try {
+        response = await fetch(endpoint, {
+          method: "POST",
+          body: new URLSearchParams({ data: query }),
+          signal: controller.signal
         });
-        if (window.caches) caches.keys().then(function(names) {
-            for (let name of names) caches.delete(name);
-        });
-    })();
+      } finally {
+        clearTimeout(timer);
+      }
 
-    // Apply saved UI theme before app.js loads
-    (function() {
-        try {
-            const t = localStorage.getItem('steeradar-theme') || 'light';
-            document.documentElement.setAttribute('data-theme', t);
-        } catch (e) {}
-    })();
+      if (!response.ok) continue;
 
-    // Hive photo preview
-    (function() {
-        document.addEventListener('change', function(e) {
-            if (e.target && e.target.id === 'hive-photo') {
-                const prev = document.getElementById('hive-photo-preview');
-                if (!prev) return;
-                prev.innerHTML = '';
-                const f = e.target.files && e.target.files[0];
-                if (!f) return;
-                const url = URL.createObjectURL(f);
-                const img = document.createElement('img');
-                img.src = url;
-                img.style.cssText = 'max-width:100%; border-radius:10px; border:1px solid var(--border-color);';
-                prev.appendChild(img);
-            }
-        });
-    })();
+      const data = await response.json();
+      return data.elements || [];
 
-    // ⭐ GLOBAL: any avatar click → open that user's profile
-    // Detects <img class="user-avatar"> or <img class="driver-avatar"> and
-    // uses data-user-phone if present.
-    document.addEventListener('click', function (e) {
-        const img = e.target.closest && e.target.closest('img.user-avatar, img.driver-avatar, img.chat-avatar');
-        if (!img) return;
-        // Skip the header avatar (that one switches tabs)
-        if (img.id === 'header-avatar') return;
-        // Skip the chat header avatar
-        if (img.id === 'chat-header-avatar') return;
-        // Skip agent profile avatar inside the modal (would be recursive)
-        if (img.id === 'agent-profile-avatar') return;
+    } catch (error) {
+      console.warn("Overpass endpoint failed", error);
+    }
+  }
 
-        const phone = img.dataset.userPhone || img.dataset.phone || '';
-        if (typeof window.openUserProfileFromElement === 'function') {
-            e.preventDefault();
-            e.stopPropagation();
-            window.openUserProfileFromElement(img, phone);
-        }
-    }, true);
+  throw new Error("Unable to retrieve OpenStreetMap data");
+}
+
+// ========= NORMALIZE RESULTS =========
+
+function normalizePlaces(elements, lat, lon) {
+  const unique = new Map();
+
+  for (const el of elements) {
+    const pLat = el.lat ?? el.center?.lat;
+    const pLon = el.lon ?? el.center?.lon;
+
+    if (!Number.isFinite(pLat) ||
+        !Number.isFinite(pLon)) continue;
+
+    const tags = el.tags || {};
+    const type = classify(tags);
+
+    const place = {
+      id: el.type + ":" + el.id,
+      name: tags.name ||
+            tags["name:en"] ||
+            "Unnamed " + type + " location",
+      type,
+      lat: pLat,
+      lon: pLon,
+      distance: distanceMetres(
+        lat, lon, pLat, pLon
+      )
+    };
+
+    unique.set(place.id, place);
+  }
+
+  return [...unique.values()];
+}
+
+// ========= NAVIGATION =========
+
+function openDirections(place) {
+  rememberChoice(place.type);
+
+  const url =
+    "https://www.google.com/maps/dir/?api=1" +
+    "&destination=" +
+    encodeURIComponent(
+      place.lat + "," + place.lon
+    ) +
+    "&travelmode=walking";
+
+  window.location.href = url;
+}
+
+// ========= COMMUNITY SHARING =========
+
+async function sharePlace(place) {
+  rememberChoice(place.type);
+
+  const message =
+    "Steerradar nearby location: " +
+    place.name + "\n" +
+    "https://www.google.com/maps/search/?api=1&query=" +
+    encodeURIComponent(
+      place.lat + "," + place.lon
+    );
+
+  try {
+    if (navigator.share) {
+      await navigator.share({
+        title: place.name,
+        text: message
+      });
+    } else if (navigator.clipboard) {
+      await navigator.clipboard.writeText(message);
+      alert("Location copied. Share it with your community.");
+    } else {
+      prompt("Copy this location:", message);
+    }
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      alert("Unable to share this location.");
+    }
+  }
+}
+
+// ========= RENDER =========
+
+function renderPlaces() {
+  markers.clearLayers();
+  resultsEl.replaceChildren();
+
+  if (!currentPosition) return;
+
+  const selected = categoryEl.value;
+
+  const filtered = currentPlaces.filter(place =>
+    selected === "all" || place.type === selected
+  );
+
+  const ranked = rankPlaces(filtered).slice(0, 30);
+
+  if (!ranked.length) {
+    statusEl.textContent =
+      "No mapped locations found for this category.";
+    return;
+  }
+
+  statusEl.textContent =
+    ranked.length + " places displayed. " +
+    "Top suggestion is based on proximity and preferences.";
+
+  L.circleMarker(
+    [currentPosition.lat, currentPosition.lon],
+    {
+      radius: 9,
+      color: "#ffffff",
+      fillColor: "#20dfba",
+      fillOpacity: 1
+    }
+  ).addTo(markers).bindPopup("Your current location");
+
+  ranked.forEach((place, index) => {
+    const marker = L.marker(
+      [place.lat, place.lon]
+    ).addTo(markers);
+
+    marker.bindPopup(
+      document.createTextNode(place.name)
+    );
+
+    const card = document.createElement("div");
+    card.className = "card";
+
+    if (index === 0) card.classList.add("best");
+
+    const title = document.createElement("h3");
+    title.textContent =
+      iconFor(place.type) + " " + place.name;
+
+    const info = document.createElement("p");
+    info.textContent =
+      Math.round(place.distance) +
+      " metres away (straight-line distance)";
+
+    const subtitle = document.createElement("p");
+    subtitle.className = "small";
+    subtitle.textContent =
+      index === 0
+        ? "Top smart recommendation"
+        : place.type.toUpperCase();
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    const directions = document.createElement("button");
+    directions.textContent = "Directions";
+    directions.onclick = () => openDirections(place);
+
+    const share = document.createElement("button");
+    share.textContent = "Share";
+    share.onclick = () => sharePlace(place);
+
+    actions.append(directions, share);
+    card.append(title, subtitle, info, actions);
+    resultsEl.append(card);
+  });
+
+  map.setView(
+    [currentPosition.lat, currentPosition.lon],
+    14
+  );
+}
+
+// ========= LOCATION =========
+
+async function findNearby() {
+  findBtn.disabled = true;
+  statusEl.textContent = "Locating you...";
+
+  try {
+    const position = await new Promise(
+      (resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          resolve, reject,
+          {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 30000
+          }
+        );
+      }
+    );
+
+    const lat = position.coords.latitude;
+    const lon = position.coords.longitude;
+
+    currentPosition = { lat, lon };
+
+    statusEl.textContent = "Loading nearby places...";
+
+    const elements = await fetchPlaces(lat, lon);
+
+    currentPlaces = normalizePlaces(
+      elements, lat, lon
+    );
+
+    renderPlaces();
+
+  } catch (error) {
+    console.error(error);
+    statusEl.textContent =
+      "Unable to load nearby places. " +
+      "Check GPS, location permission, network " +
+      "or try again later.";
+  } finally {
+    findBtn.disabled = false;
+  }
+}
+
+findBtn.addEventListener("click", findNearby);
+categoryEl.addEventListener("change", renderPlaces);
 </script>
 </body>
 </html>
